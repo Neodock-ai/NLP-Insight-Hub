@@ -1,3 +1,4 @@
 cmake
 pkg-config
 rustc
+build-essential
