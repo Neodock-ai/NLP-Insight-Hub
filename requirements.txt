@@ -2,6 +2,7 @@ streamlit==1.16.0
 torch==2.6.0
 transformers==4.29.2
 numpy
+rustc
 pandas
 requests
 altair==4.2.2
