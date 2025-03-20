@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -e
+
+echo "Running postbuild script..."
+
+# 1. Install Rust
+bash ./install_rust.sh
+
+# 2. Re-export the PATH so pip sees Cargo in the same script
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# 3. Now install the Rust-based packages that used to be in requirements.txt:
+pip install tokenizers==0.13.3 sentencepiece==0.1.96
