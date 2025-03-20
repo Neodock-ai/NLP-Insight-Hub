@@ -1,4 +1,8 @@
 cmake
 pkg-config
 rustc
+cargo
 build-essential
+protobuf-compiler
+libprotobuf-dev
+libssl-dev
