@@ -137,5 +137,5 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## Contact
 
-For inquiries, feedback, or contributions, please open an issue in the repository or contact [your.email@example.com](mailto:your.email@example.com).
+For inquiries, feedback, or contributions, please open an issue in the repository or contact [devanmaar1998@gmail.com](mailto:devanmaar1998@gmail.com).
 ```
