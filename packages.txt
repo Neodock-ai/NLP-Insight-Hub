@@ -1,3 +1,4 @@
+rustc
 libsentencepiece-dev
 cmake
 pkg-config
