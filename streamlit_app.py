@@ -1,3 +1,5 @@
+import subprocess
+subprocess.run(["bash", "setup.sh"], check=True)
 import streamlit as st
 import logging
 from pipeline import data_ingestion, pre_processing, inference, post_processing
