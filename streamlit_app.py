@@ -1,19 +1,36 @@
 import streamlit as st
 import logging
 import os
+import sys
 from pathlib import Path
 import importlib.util
 import time
 import re
 import math
-from plotly.subplots import make_subplots
+
+# Fix import paths - add parent directory and potential module directories to path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)  # Add current directory to path
+sys.path.insert(0, os.path.join(current_dir, 'models'))  # Add models directory
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)  # Add parent directory to path
 
 # First check if dependencies are installed
 try:
     from pipeline import data_ingestion, pre_processing, inference, post_processing
     from utils.logger import get_logger
     from utils.visualizations import create_sentiment_chart, create_keyword_cloud
-except ImportError:
+except ImportError as e:
+    st.error(f"Module import error: {str(e)}")
+    st.info(f"Python path: {sys.path}")
+    st.info(f"Current directory: {os.getcwd()}")
+    
+    if os.path.exists('pipeline'):
+        st.info(f"Pipeline directory exists. Contents: {os.listdir('pipeline')}")
+    else:
+        st.error("Pipeline directory not found!")
+    
+    # Try installing dependencies
     st.error("Required modules not found. Installing dependencies...")
     import subprocess
     try:
@@ -765,8 +782,11 @@ def main():
                         
                         with col2:
                             if visualization_enabled and "data" in value:
-                                sentiment_chart = create_sentiment_chart(value["data"])
-                                st.plotly_chart(sentiment_chart, use_container_width=True)
+                                try:
+                                    sentiment_chart = create_sentiment_chart(value["data"])
+                                    st.plotly_chart(sentiment_chart, use_container_width=True)
+                                except Exception as viz_error:
+                                    st.warning(f"Could not create visualization: {str(viz_error)}")
                         
                         # Add metrics display
                         if isinstance(value, dict) and value:
@@ -824,8 +844,11 @@ def main():
                         
                         with col2:
                             if visualization_enabled and "data" in value:
-                                keyword_cloud = create_keyword_cloud(value["data"])
-                                st.plotly_chart(keyword_cloud, use_container_width=True)
+                                try:
+                                    keyword_cloud = create_keyword_cloud(value["data"])
+                                    st.plotly_chart(keyword_cloud, use_container_width=True)
+                                except Exception as viz_error:
+                                    st.warning(f"Could not create visualization: {str(viz_error)}")
                         
                         # Add metrics display
                         if isinstance(value, dict) and value:
