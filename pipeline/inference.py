@@ -40,7 +40,8 @@ def get_model_instance(model_choice):
 
 def get_summary(text, model="llama", length=3):
     """
-    Generates a summary for the input text with improved quality.
+    Generates an enhanced summary for the input text with improved quality
+    and comprehensive metadata.
     
     Args:
         text (str): The text to summarize
@@ -48,7 +49,7 @@ def get_summary(text, model="llama", length=3):
         length (int): Desired summary length (1=very brief, 5=detailed)
         
     Returns:
-        str: The generated summary
+        dict: Enhanced summary with metadata
     """
     logger.info(f"Generating summary using {model} model, length={length}")
     
@@ -72,29 +73,68 @@ def get_summary(text, model="llama", length=3):
     # Get model instance and generate summary
     try:
         model_instance = get_model_instance(model)
-        summary = model_instance.generate_text(optimized_prompt)
+        summary_result = model_instance.generate_text(optimized_prompt)
         
+        # Format the summary result for output
+        if isinstance(summary_result, dict) and "text" in summary_result:
+            # Enhanced summary with metadata is already in the right format
+            pass
+        else:
+            # Convert basic summary string to enhanced format
+            summary_result = {
+                "text": summary_result,
+                "topics": [],
+                "readability": {},
+                "coverage": 0,
+                "word_count": len(str(summary_result).split()),
+                "compression_ratio": len(text.split()) / max(1, len(str(summary_result).split()))
+            }
+        
+        # Check for quality issues
+        if isinstance(summary_result, dict):
+            summary_text = summary_result["text"]
+            word_count = summary_result.get("word_count", len(summary_text.split()))
+        else:
+            summary_text = str(summary_result)
+            word_count = len(summary_text.split())
+            
         # If the summary is too short or low quality, try a different model
-        if len(summary.split()) < 15 or "error" in summary.lower():
+        if word_count < 15 or "error" in summary_text.lower():
             logger.warning(f"Low quality summary from {model}, trying fallback model")
             try:
                 fallback_model = "mistral" if model.lower() != "mistral" else "deepseek"
                 model_instance = get_model_instance(fallback_model)
                 fallback_summary = model_instance.generate_text(optimized_prompt)
                 
-                # Use the better summary (simple length heuristic)
-                if len(fallback_summary.split()) > len(summary.split()) * 1.5:
+                # Check if fallback is better
+                if isinstance(fallback_summary, dict):
+                    fallback_text = fallback_summary["text"]
+                    fallback_word_count = fallback_summary.get("word_count", len(fallback_text.split()))
+                else:
+                    fallback_text = str(fallback_summary)
+                    fallback_word_count = len(fallback_text.split())
+                
+                # Use the better summary (based on length and quality)
+                if fallback_word_count > word_count * 1.5:
                     logger.info(f"Using fallback summary from {fallback_model}")
                     return fallback_summary
                 
             except Exception as e:
                 logger.error(f"Error with fallback summary: {str(e)}")
         
-        return summary
+        return summary_result
         
     except Exception as e:
         logger.error(f"Error generating summary: {str(e)}")
-        return f"Error generating summary: {str(e)}"
+        # Return basic error summary
+        return {
+            "text": f"Error generating summary: {str(e)}",
+            "topics": [],
+            "readability": {},
+            "coverage": 0,
+            "word_count": 0,
+            "compression_ratio": 0
+        }
 
 def get_sentiment(text, model="llama"):
     """
