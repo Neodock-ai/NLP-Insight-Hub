@@ -31,43 +31,128 @@ logger = get_logger("NLPInsightHub")
 
 # Cache expensive operations
 @st.cache_data
-def process_text(text, model, tasks):
-    """Process text with the selected model and return results for all tasks"""
-    results = {}
-    clean_text = pre_processing.clean_text(text)
+def process_text(text, model, tasks, advanced_settings=None):
+    """
+    Process text with the selected model and return results for all tasks with improved processing.
     
+    Args:
+        text (str): The text to process
+        model (str): The model name to use
+        tasks (list): List of tasks to perform
+        advanced_settings (dict): Optional advanced settings
+        
+    Returns:
+        tuple: (cleaned_text, results_dict)
+    """
+    if advanced_settings is None:
+        advanced_settings = {}
+    
+    summary_length = advanced_settings.get('summary_length', 3)
+    
+    logger.info(f"Processing text with {model} model for tasks: {', '.join(tasks)}")
+    results = {}
+    
+    # Apply appropriate preprocessing based on the tasks
+    if "Summarization" in tasks:
+        # Special preprocessing for summarization
+        summary_text = pre_processing.preprocess_for_summarization(text)
+        clean_text = pre_processing.clean_text(text)  # Keep standard clean text for other tasks
+    else:
+        # Standard preprocessing for other tasks
+        clean_text = pre_processing.clean_text(text)
+        summary_text = clean_text  # Not used if summarization not selected
+    
+    # Process each requested task
     if "Summarization" in tasks:
         try:
-            summary = inference.get_summary(clean_text, model=model)
+            # Get optimized summary prompt
+            from prompt_engineering import prompt_templates, prompt_optimizer
+            prompt = prompt_templates.get_summary_prompt(summary_text)
+            optimized_prompt = prompt_optimizer.optimize_prompt(prompt)
+            
+            # Generate summary with length parameter
+            summary = inference.get_summary(summary_text, model=model, length=summary_length)
+            
+            # Format summary with improved formatting
             results["Summary"] = post_processing.format_summary(summary)
+            logger.info("Summarization completed successfully")
         except Exception as e:
             logger.error(f"Summarization failed: {str(e)}")
             results["Summary"] = f"Error generating summary: {str(e)}"
     
     if "Sentiment Analysis" in tasks:
         try:
-            sentiment = inference.get_sentiment(clean_text, model=model)
+            # Special preprocessing for sentiment analysis
+            sentiment_text = pre_processing.preprocess_for_sentiment(text)
+            
+            # Get sentiment analysis
+            sentiment = inference.get_sentiment(sentiment_text, model=model)
+            
+            # Format sentiment results with improved formatting
+            formatted_sentiment = post_processing.format_sentiment(sentiment)
+            
+            # Structure result for compatibility with visualization
             results["Sentiment Analysis"] = {
-                "text": post_processing.format_sentiment(sentiment),
-                "raw_sentiment": sentiment,  # Raw data for visualization
-                "data": sentiment  # Keep original data key for compatibility
+                "text": formatted_sentiment.get("text", ""),
+                "raw_sentiment": formatted_sentiment.get("raw_sentiment", ""),
+                "data": sentiment  # Keep original data for visualization
             }
+            logger.info("Sentiment analysis completed successfully")
         except Exception as e:
             logger.error(f"Sentiment analysis failed: {str(e)}")
             results["Sentiment Analysis"] = {"text": f"Error analyzing sentiment: {str(e)}"}
     
     if "Keyword Extraction" in tasks:
         try:
-            keywords = inference.get_keywords(clean_text, model=model)
+            # Special preprocessing for keyword extraction
+            keyword_text = pre_processing.preprocess_for_keywords(text)
+            
+            # Extract keywords
+            keywords = inference.get_keywords(keyword_text, model=model)
+            
+            # Format keywords with improved formatting
+            formatted_keywords = post_processing.format_keywords(keywords)
+            
+            # Structure result for compatibility with visualization
             results["Keyword Extraction"] = {
-                "text": post_processing.format_keywords(keywords),
-                "data": keywords  # Raw data for visualization
+                "text": formatted_keywords.get("text", ""),
+                "data": keywords  # Keep original data for visualization
             }
+            logger.info("Keyword extraction completed successfully")
         except Exception as e:
             logger.error(f"Keyword extraction failed: {str(e)}")
             results["Keyword Extraction"] = {"text": f"Error extracting keywords: {str(e)}"}
     
     return clean_text, results
+
+def answer_question(text, question, model):
+    """
+    Improved question answering function.
+    
+    Args:
+        text (str): The context text
+        question (str): The question to answer
+        model (str): The model to use
+        
+    Returns:
+        str: Formatted answer
+    """
+    try:
+        # Apply optimized prompting
+        from prompt_engineering import prompt_templates, prompt_optimizer
+        prompt = prompt_templates.get_qa_prompt(text, question)
+        optimized_prompt = prompt_optimizer.optimize_prompt(prompt)
+        
+        # Generate answer
+        answer = inference.get_qa(text, question, model=model)
+        
+        # Format answer
+        formatted_answer = post_processing.format_qa(answer)
+        
+        return formatted_answer
+    except Exception as e:
+        logger.error(f"Error in question answering: {str(e)}")
+        return f"Error answering question: {str(e)}"
 
 def main():
     st.set_page_config(
@@ -87,6 +172,10 @@ def main():
         st.session_state.clean_text = ""
     if 'results' not in st.session_state:
         st.session_state.results = {}
+    if 'summary_length' not in st.session_state:
+        st.session_state.summary_length = 3
+    if 'visualization_enabled' not in st.session_state:
+        st.session_state.visualization_enabled = True
     
     # Sidebar configuration for model and tasks
     st.sidebar.header("Configuration")
@@ -122,19 +211,21 @@ def main():
     
     # Add advanced settings in expander
     with st.sidebar.expander("Advanced Settings"):
-        summarization_length = st.slider(
+        summary_length = st.slider(
             "Summary Length", 
             min_value=1, 
             max_value=5, 
-            value=3,
+            value=st.session_state.get('summary_length', 3),
             help="Controls the length of generated summaries (1=very brief, 5=detailed)"
         )
+        st.session_state.summary_length = summary_length
         
         visualization_enabled = st.checkbox(
             "Enable Visualizations", 
-            value=True,
+            value=st.session_state.get('visualization_enabled', True),
             help="Show charts and visualizations for analysis results"
         )
+        st.session_state.visualization_enabled = visualization_enabled
     
     # Input section
     st.sidebar.write("Upload a text file or paste text below:")
@@ -182,11 +273,17 @@ def main():
             status_text.text("Processing text...")
             progress_bar.progress(30)
             
-            # Process the text and get results
+            # Process the text and get results with advanced settings
+            advanced_settings = {
+                'summary_length': summary_length,
+                'visualization_enabled': visualization_enabled
+            }
+            
             st.session_state.clean_text, st.session_state.results = process_text(
                 raw_text, 
                 model_choice, 
-                task_choices
+                task_choices,
+                advanced_settings
             )
             
             progress_bar.progress(90)
@@ -207,6 +304,9 @@ def main():
             time.sleep(2)
             progress_bar.empty()
             status_text.empty()
+            
+            # Store raw text for display
+            st.session_state.raw_text = raw_text
             
             # Force page refresh to show results
             st.experimental_rerun()
@@ -234,7 +334,7 @@ def main():
             with tabs[0]:
                 if 'uploaded_file' in locals() and uploaded_file:
                     st.write(f"File: {uploaded_file.name}")
-                st.write(raw_text if 'raw_text' in locals() else "Original text not available")
+                st.write(st.session_state.get('raw_text', "Original text not available"))
             with tabs[1]:
                 st.write(st.session_state.clean_text)
                 
@@ -253,39 +353,41 @@ def main():
                     elif key == "Sentiment Analysis" and isinstance(value, dict):
                         col1, col2 = st.columns([3, 2])
                         with col1:
-                            # Use safe markdown rendering instead of HTML
-                            # Extract sentiment value to determine display
-                            raw_sentiment = value.get("raw_sentiment", "").strip().lower()
-                            
-                            st.markdown("## Sentiment Analysis")
-                            
-                            # Determine sentiment category and emoji
-                            if "positive" in raw_sentiment:
-                                sentiment_text = "Positive"
-                                emoji = "😃"
-                                # Use markdown formatting instead of HTML
-                                st.markdown(f"**Overall sentiment:** **{sentiment_text}** {emoji}")
-                            elif "negative" in raw_sentiment:
-                                sentiment_text = "Negative"
-                                emoji = "😞"
-                                st.markdown(f"**Overall sentiment:** **{sentiment_text}** {emoji}")
+                            # Use text key from formatted sentiment if available
+                            if "text" in value and isinstance(value["text"], str):
+                                st.markdown(value["text"])
                             else:
-                                sentiment_text = "Neutral"
-                                emoji = "😐"
-                                st.markdown(f"**Overall sentiment:** **{sentiment_text}** {emoji}")
+                                # Extract sentiment value to determine display
+                                raw_sentiment = value.get("raw_sentiment", "").strip().lower()
                                 
-                            st.markdown("*Note: This is an automated sentiment analysis and may not capture nuanced emotions.*")
+                                st.markdown("## Sentiment Analysis")
+                                
+                                # Determine sentiment category and emoji
+                                if "positive" in raw_sentiment:
+                                    sentiment_text = "Positive"
+                                    emoji = "😃"
+                                    st.markdown(f"**Overall sentiment:** **{sentiment_text}** {emoji}")
+                                elif "negative" in raw_sentiment:
+                                    sentiment_text = "Negative"
+                                    emoji = "😞"
+                                    st.markdown(f"**Overall sentiment:** **{sentiment_text}** {emoji}")
+                                else:
+                                    sentiment_text = "Neutral"
+                                    emoji = "😐"
+                                    st.markdown(f"**Overall sentiment:** **{sentiment_text}** {emoji}")
+                                    
+                                st.markdown("*Note: This is an automated sentiment analysis and may not capture nuanced emotions.*")
                         
                         with col2:
                             if visualization_enabled and "data" in value:
                                 sentiment_chart = create_sentiment_chart(value["data"])
                                 st.plotly_chart(sentiment_chart, use_container_width=True)
                     
-                    elif key == "Keyword Extraction" and "data" in value:
+                    elif key == "Keyword Extraction" and isinstance(value, dict):
                         col1, col2 = st.columns([2, 3])
                         with col1:
-                            # Use only the markdown part
-                            if isinstance(value.get("text"), str):
+                            # Use text key from formatted keywords if available
+                            if "text" in value and isinstance(value["text"], str):
                                 st.markdown(value["text"])
                             else:
                                 st.markdown("## Key Topics & Concepts")
@@ -309,8 +411,12 @@ def main():
                 if question and ask_button:
                     with st.spinner("Processing your question..."):
                         try:
-                            answer = inference.get_qa(st.session_state.clean_text, question, model=model_choice)
-                            formatted_answer = post_processing.format_qa(answer)
+                            # Use improved question answering function
+                            formatted_answer = answer_question(
+                                st.session_state.clean_text, 
+                                question, 
+                                model=model_choice
+                            )
                             
                             # Display answer in a nice format
                             st.markdown("### Answer")
