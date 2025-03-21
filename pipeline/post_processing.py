@@ -1,78 +1,201 @@
+import re
+
 def format_summary(summary):
     """
-    Formats the summary output.
+    Formats the summary output with improved formatting and structure.
+    
+    Args:
+        summary (str): The raw summary text from the model
+        
+    Returns:
+        str: Formatted summary with markdown styling
     """
     summary = summary.strip()
     
-    # Add some styling to make it more presentable
-    return f"""
-    ## Text Summary
+    # Remove any prefixes like "Summary:" that might be in the output
+    summary = re.sub(r'^(Summary:?\s*)', '', summary, flags=re.IGNORECASE)
     
-    {summary}
-    """
+    # Split into paragraphs if it's a long summary
+    paragraphs = summary.split('\n\n')
+    formatted_paragraphs = []
+    
+    for paragraph in paragraphs:
+        # Clean up the paragraph
+        clean_paragraph = paragraph.strip()
+        if clean_paragraph:
+            formatted_paragraphs.append(clean_paragraph)
+    
+    # If there are multiple paragraphs, format them with bullet points
+    if len(formatted_paragraphs) > 1:
+        formatted_text = "## Text Summary\n\n"
+        for para in formatted_paragraphs:
+            formatted_text += f"• {para}\n\n"
+        return formatted_text
+    else:
+        # For single paragraphs, use simpler formatting
+        return f"""## Text Summary
 
-def format_sentiment(sentiment):
+{summary}
+"""
+
+def format_sentiment(sentiment_result):
     """
-    Formats the sentiment analysis output using markdown instead of HTML.
-    """
-    sentiment = sentiment.strip().lower()
+    Enhanced sentiment analysis formatting with better structure.
     
-    # Create a more visual representation
-    if "positive" in sentiment:
+    Args:
+        sentiment_result: Can be a string or a dictionary with detailed sentiment data
+        
+    Returns:
+        dict: Structured sentiment data with formatted text
+    """
+    # Handle different input types
+    if isinstance(sentiment_result, dict):
+        # Use the sentiment data from the dict if available
+        if 'sentiment' in sentiment_result:
+            sentiment = sentiment_result['sentiment']
+        else:
+            # Extract sentiment from scores if available
+            scores = sentiment_result.get('scores', {})
+            if scores:
+                max_sentiment = max(scores.items(), key=lambda x: x[1])
+                sentiment = max_sentiment[0].capitalize()
+            else:
+                # Default if we can't determine
+                sentiment = "Neutral"
+    else:
+        # Process the string input
+        sentiment_text = sentiment_result.strip()
+        
+        # Extract the sentiment classification from the text
+        if "positive" in sentiment_text.lower():
+            sentiment = "Positive"
+        elif "negative" in sentiment_text.lower():
+            sentiment = "Negative"
+        else:
+            sentiment = "Neutral"
+    
+    # Define emoji and color based on sentiment
+    if sentiment.lower() == "positive":
         emoji = "😃"
-        sentiment_text = "Positive"
-    elif "negative" in sentiment:
+        color = "green"
+    elif sentiment.lower() == "negative":
         emoji = "😞"
-        sentiment_text = "Negative"
+        color = "red"
     else:
         emoji = "😐"
-        sentiment_text = "Neutral"
+        color = "gray"
     
-    # Return a dictionary with structured data
+    # Extract explanation if available
+    explanation = ""
+    if isinstance(sentiment_result, str):
+        # Try to extract explanation after the sentiment classification
+        match = re.search(r'(positive|negative|neutral)[:\s]+(.+)', sentiment_result, re.IGNORECASE)
+        if match:
+            explanation = match.group(2).strip()
+    
+    # Create the formatted output
+    markdown_text = f"""## Sentiment Analysis
+
+**Overall sentiment:** <span style="color:{color}">**{sentiment}**</span> {emoji}
+
+"""
+    
+    # Add explanation if available
+    if explanation:
+        markdown_text += f"**Analysis:** {explanation}\n\n"
+    
+    markdown_text += "*Note: This is an automated sentiment analysis that evaluates the emotional tone of the text.*"
+    
+    # Return a dictionary with both the raw data and formatted text
     return {
-        "sentiment": sentiment_text,
+        "sentiment": sentiment,
         "emoji": emoji,
-        "markdown_text": f"""
-        ## Sentiment Analysis
-        
-        Overall sentiment: **{sentiment_text}** {emoji}
-        
-        *Note: This is an automated sentiment analysis and may not capture nuanced emotions.*
-        """
+        "color": color,
+        "text": markdown_text,
+        "raw_sentiment": sentiment.lower()  # For compatibility with visualization
     }
 
 def format_keywords(keywords):
     """
-    Formats the keyword extraction output as a visual list.
-    """
-    # First check if keywords is already a list
-    if isinstance(keywords, list):
-        keyword_list = keywords
-    else:
-        # Otherwise split the string
-        keyword_list = [keyword.strip() for keyword in keywords.split(',') if keyword.strip()]
+    Enhanced keyword formatting with better structure and presentation.
     
-    # Format as markdown with some visual elements
-    if keyword_list:
-        keyword_html = "\n".join([f"- {keyword}" for keyword in keyword_list])
-        return f"""
-        ## Key Topics & Concepts
+    Args:
+        keywords: String of comma-separated keywords or list of keyword tuples
         
-        The following keywords were extracted from the text:
-        
-        {keyword_html}
-        """
+    Returns:
+        dict: Structured keyword data with formatted text
+    """
+    # Process different input types
+    if isinstance(keywords, list):
+        if keywords and isinstance(keywords[0], tuple):
+            # It's a list of (keyword, weight) tuples
+            keyword_items = [kw for kw, _ in keywords]
+        else:
+            # It's a simple list of keywords
+            keyword_items = keywords
+    elif isinstance(keywords, str):
+        # It's a comma-separated string
+        keyword_items = [k.strip() for k in keywords.split(',') if k.strip()]
     else:
-        return "No keywords were extracted from the text."
+        # Default empty list
+        keyword_items = []
+    
+    # Format the output
+    if keyword_items:
+        # Group keywords by importance (assume first ones are more important)
+        primary_keywords = keyword_items[:min(5, len(keyword_items))]
+        secondary_keywords = keyword_items[min(5, len(keyword_items)):min(10, len(keyword_items))]
+        remaining_keywords = keyword_items[min(10, len(keyword_items)):]
+        
+        markdown_text = "## Key Topics & Concepts\n\n"
+        
+        if primary_keywords:
+            markdown_text += "**Primary Topics:**\n"
+            for kw in primary_keywords:
+                markdown_text += f"- {kw}\n"
+            markdown_text += "\n"
+        
+        if secondary_keywords:
+            markdown_text += "**Secondary Topics:**\n"
+            for kw in secondary_keywords:
+                markdown_text += f"- {kw}\n"
+            markdown_text += "\n"
+        
+        if remaining_keywords:
+            markdown_text += "**Additional Concepts:**\n"
+            for kw in remaining_keywords:
+                markdown_text += f"- {kw}\n"
+            markdown_text += "\n"
+    else:
+        markdown_text = "## Key Topics & Concepts\n\nNo significant keywords were identified in the text."
+    
+    # Return a dictionary with both the raw data and formatted text
+    return {
+        "text": markdown_text,
+        "data": keywords  # Keep original data for visualization
+    }
 
 def format_qa(answer):
     """
-    Formats the Q&A output with better formatting.
+    Enhanced Q&A formatting with better structure.
+    
+    Args:
+        answer (str): The raw answer from the model
+        
+    Returns:
+        str: Formatted answer with markdown styling
     """
     answer = answer.strip()
     
-    return f"""
-    {answer}
+    # Remove any prefixes like "Answer:" that might be in the output
+    answer = re.sub(r'^(Answer:?\s*)', '', answer, flags=re.IGNORECASE)
     
-    *Note: This answer is generated based on the provided text and may not be comprehensive.*
-    """
+    # Format the answer
+    formatted_answer = f"""### Answer
+
+{answer}
+
+*Note: This answer is generated based on the provided text and context.*
+"""
+    
+    return formatted_answer
