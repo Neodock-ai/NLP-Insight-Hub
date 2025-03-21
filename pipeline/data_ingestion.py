@@ -1,3 +1,13 @@
+def read_file(file):
+    """
+    Reads an uploaded file and returns its content as a string.
+    """
+    try:
+        return file.read().decode("utf-8")
+    except Exception as e:
+        raise ValueError("Error reading file: " + str(e))
+
+
 def read_pdf(file):
     """
     Reads a PDF file and returns its content as a string.
@@ -20,6 +30,7 @@ def read_pdf(file):
         raise ImportError("PyPDF2 is required to read PDF files. Add it to requirements.txt.")
     except Exception as e:
         raise ValueError(f"Error reading PDF file: {str(e)}")
+
 
 def read_docx(file):
     """
