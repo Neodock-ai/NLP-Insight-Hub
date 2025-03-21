@@ -31,10 +31,11 @@ def format_sentiment(sentiment):
         color = "gray"
         sentiment_text = "Neutral"
     
+    # Use markdown instead of HTML tags
     return f"""
     ## Sentiment Analysis
     
-    Overall sentiment: <span style="color:{color};font-weight:bold">{sentiment_text} {emoji}</span>
+    Overall sentiment: **{sentiment_text}** {emoji}
     
     *Note: This is an automated sentiment analysis and may not capture nuanced emotions.*
     """
