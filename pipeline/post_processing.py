@@ -28,17 +28,17 @@ def format_sentiment(sentiment):
         emoji = "😐"
         sentiment_text = "Neutral"
     
-    # Use only markdown, no HTML tags
+    # Return a dictionary with structured data
     return {
-        "text": f"""
+        "sentiment": sentiment_text,
+        "emoji": emoji,
+        "markdown_text": f"""
         ## Sentiment Analysis
         
         Overall sentiment: **{sentiment_text}** {emoji}
         
         *Note: This is an automated sentiment analysis and may not capture nuanced emotions.*
-        """,
-        "sentiment": sentiment_text,
-        "emoji": emoji
+        """
     }
 
 def format_keywords(keywords):
