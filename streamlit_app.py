@@ -49,7 +49,8 @@ def process_text(text, model, tasks):
             sentiment = inference.get_sentiment(clean_text, model=model)
             results["Sentiment Analysis"] = {
                 "text": post_processing.format_sentiment(sentiment),
-                "data": sentiment  # Raw data for visualization
+                "raw_sentiment": sentiment,  # Raw data for visualization
+                "data": sentiment  # Keep original data key for compatibility
             }
         except Exception as e:
             logger.error(f"Sentiment analysis failed: {str(e)}")
@@ -231,7 +232,7 @@ def main():
         with st.expander("Original and Cleaned Text", expanded=False):
             tabs = st.tabs(["Original", "Cleaned"])
             with tabs[0]:
-                if uploaded_file:
+                if 'uploaded_file' in locals() and uploaded_file:
                     st.write(f"File: {uploaded_file.name}")
                 st.write(raw_text if 'raw_text' in locals() else "Original text not available")
             with tabs[1]:
@@ -249,18 +250,47 @@ def main():
                     # Different display depending on the result type
                     if key == "Summary":
                         st.markdown(value)
-                    elif key == "Sentiment Analysis" and "data" in value:
+                    elif key == "Sentiment Analysis" and isinstance(value, dict):
                         col1, col2 = st.columns([3, 2])
                         with col1:
-                            st.markdown(value["text"])
+                            # Use safe markdown rendering instead of HTML
+                            # Extract sentiment value to determine display
+                            raw_sentiment = value.get("raw_sentiment", "").strip().lower()
+                            
+                            st.markdown("## Sentiment Analysis")
+                            
+                            # Determine sentiment category and emoji
+                            if "positive" in raw_sentiment:
+                                sentiment_text = "Positive"
+                                emoji = "😃"
+                                # Use markdown formatting instead of HTML
+                                st.markdown(f"**Overall sentiment:** **{sentiment_text}** {emoji}")
+                            elif "negative" in raw_sentiment:
+                                sentiment_text = "Negative"
+                                emoji = "😞"
+                                st.markdown(f"**Overall sentiment:** **{sentiment_text}** {emoji}")
+                            else:
+                                sentiment_text = "Neutral"
+                                emoji = "😐"
+                                st.markdown(f"**Overall sentiment:** **{sentiment_text}** {emoji}")
+                                
+                            st.markdown("*Note: This is an automated sentiment analysis and may not capture nuanced emotions.*")
+                        
                         with col2:
                             if visualization_enabled and "data" in value:
                                 sentiment_chart = create_sentiment_chart(value["data"])
                                 st.plotly_chart(sentiment_chart, use_container_width=True)
+                    
                     elif key == "Keyword Extraction" and "data" in value:
                         col1, col2 = st.columns([2, 3])
                         with col1:
-                            st.markdown(value["text"])
+                            # Use only the markdown part
+                            if isinstance(value.get("text"), str):
+                                st.markdown(value["text"])
+                            else:
+                                st.markdown("## Key Topics & Concepts")
+                                st.markdown("Keywords extracted from the text:")
+                        
                         with col2:
                             if visualization_enabled and "data" in value:
                                 keyword_cloud = create_keyword_cloud(value["data"])
