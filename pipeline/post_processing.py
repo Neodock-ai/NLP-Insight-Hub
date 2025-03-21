@@ -2,24 +2,46 @@ def format_summary(summary):
     """
     Formats the summary output.
     """
-    return summary.strip()
+    summary = summary.strip()
+    
+    # Add some styling to make it more presentable
+    return f"""
+    ## Text Summary
+    
+    {summary}
+    """
 
 def format_sentiment(sentiment):
     """
     Formats the sentiment analysis output.
     """
-    # Return a more detailed sentiment analysis
-    sentiment = sentiment.strip()
-    if sentiment.lower() == "positive":
-        return "The text has a **positive** sentiment overall."
-    elif sentiment.lower() == "negative":
-        return "The text has a **negative** sentiment overall."
+    sentiment = sentiment.strip().lower()
+    
+    # Create a more visual representation
+    if "positive" in sentiment:
+        emoji = "😃"
+        color = "green"
+        sentiment_text = "Positive"
+    elif "negative" in sentiment:
+        emoji = "😞"
+        color = "red"
+        sentiment_text = "Negative"
     else:
-        return "The text has a **neutral** sentiment overall."
+        emoji = "😐"
+        color = "gray"
+        sentiment_text = "Neutral"
+    
+    return f"""
+    ## Sentiment Analysis
+    
+    Overall sentiment: <span style="color:{color};font-weight:bold">{sentiment_text} {emoji}</span>
+    
+    *Note: This is an automated sentiment analysis and may not capture nuanced emotions.*
+    """
 
 def format_keywords(keywords):
     """
-    Formats the keyword extraction output as a markdown list.
+    Formats the keyword extraction output as a visual list.
     """
     # First check if keywords is already a list
     if isinstance(keywords, list):
@@ -28,14 +50,27 @@ def format_keywords(keywords):
         # Otherwise split the string
         keyword_list = [keyword.strip() for keyword in keywords.split(',') if keyword.strip()]
     
-    # Format as markdown
+    # Format as markdown with some visual elements
     if keyword_list:
-        return "**Key concepts extracted:**\n- " + "\n- ".join(keyword_list)
+        keyword_html = "\n".join([f"- {keyword}" for keyword in keyword_list])
+        return f"""
+        ## Key Topics & Concepts
+        
+        The following keywords were extracted from the text:
+        
+        {keyword_html}
+        """
     else:
-        return "No keywords were extracted."
+        return "No keywords were extracted from the text."
 
 def format_qa(answer):
     """
-    Formats the Q&A output.
+    Formats the Q&A output with better formatting.
     """
-    return f"**Answer:** {answer.strip()}"
+    answer = answer.strip()
+    
+    return f"""
+    {answer}
+    
+    *Note: This answer is generated based on the provided text and may not be comprehensive.*
+    """
