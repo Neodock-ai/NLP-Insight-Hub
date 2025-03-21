@@ -121,50 +121,50 @@ def create_sentiment_chart(sentiment_data):
 
 def create_keyword_cloud(keywords_data):
     """
-    Creates a visualization of keywords.
+    Creates a more sophisticated visualization of keywords with theme grouping.
     
     Args:
         keywords_data: String of comma-separated keywords, a list of keywords,
-                      or a list of tuples (keyword, weight)
+                      or a list of tuples (keyword, weight, category, theme)
     
     Returns:
         A Plotly figure object
     """
     # Process the keywords data
-    if isinstance(keywords_data, str):
+    keyword_dict = {}
+    themes = {}
+    
+    if isinstance(keywords_data, list):
+        if keywords_data and isinstance(keywords_data[0], tuple):
+            if len(keywords_data[0]) >= 4:  # Enhanced format with category and theme
+                for kw, weight, category, theme in keywords_data:
+                    keyword_dict[kw] = weight
+                    if theme:
+                        if theme not in themes:
+                            themes[theme] = []
+                        themes[theme].append((kw, weight))
+            elif len(keywords_data[0]) >= 3:  # With category
+                for kw, weight, category, *rest in keywords_data:
+                    keyword_dict[kw] = weight
+            else:  # Basic (keyword, weight) tuples
+                keyword_dict = {kw: weight for kw, weight in keywords_data}
+        else:
+            # Simple list of keywords, assign decreasing weights
+            keyword_dict = {kw: 10.0 - (0.1 * i) for i, kw in enumerate(keywords_data)}
+    elif isinstance(keywords_data, str):
         # Split by commas and clean up
-        keywords = [k.strip() for k in keywords_data.split(',') if k.strip()]
+        kw_list = [k.strip() for k in keywords_data.split(',') if k.strip()]
         # Assign varying weights
         keyword_dict = {}
-        for i, k in enumerate(keywords):
+        for i, k in enumerate(kw_list):
             # Create varying weights between 9.6 and 10.4
             base = 10.0
-            position_factor = (len(keywords) - i) / len(keywords) * 0.4
+            position_factor = (len(kw_list) - i) / len(kw_list) * 0.4
             random_factor = np.random.uniform(-0.2, 0.2)
             keyword_dict[k] = base + position_factor + random_factor
-    
-    elif isinstance(keywords_data, list):
-        # If it's a list of strings
-        if all(isinstance(k, str) for k in keywords_data):
-            keyword_dict = {}
-            for i, k in enumerate(keywords_data):
-                # Create varying weights
-                base = 10.0
-                position_factor = (len(keywords_data) - i) / len(keywords_data) * 0.4
-                random_factor = np.random.uniform(-0.2, 0.2)
-                keyword_dict[k] = base + position_factor + random_factor
-                
-        # If it's a list of tuples (keyword, weight)
-        elif all(isinstance(k, tuple) and len(k) == 2 for k in keywords_data):
-            keyword_dict = {k[0]: k[1] for k in keywords_data}
-        else:
-            # Default empty
-            keyword_dict = {}
-    
     elif isinstance(keywords_data, dict):
         # Already in the right format
         keyword_dict = keywords_data
-    
     else:
         # Default empty
         keyword_dict = {}
@@ -200,50 +200,121 @@ def create_keyword_cloud(keywords_data):
     # Sort by weight
     df = df.sort_values('weight', ascending=True)
     
-    # Create a horizontal bar chart with gradient color scheme
-    fig = px.bar(
-        df.tail(15),  # Show only top 15 keywords
-        y='keyword',
-        x='weight',
-        orientation='h',
-        title='Key Topics',
-        color='weight',
-        color_continuous_scale=[
-            [0, 'rgb(70, 100, 170)'],
-            [0.5, 'rgb(45, 130, 200)'],
-            [1, 'rgb(30, 170, 190)']
-        ],
-        text='weight'
-    )
-    
-    # Format the weight values in the text to 1 decimal place
-    fig.update_traces(
-        texttemplate='%{text:.1f}',
-        textposition='outside',
-        cliponaxis=False,
-        hovertemplate='<b>%{y}</b><br>Weight: %{x:.2f}<extra></extra>'
-    )
-    
-    # Improve formatting and style
-    fig.update_layout(
-        yaxis_title="",
-        xaxis_title="Relevance",
-        showlegend=False,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font={'color': 'white', 'family': 'Arial'},
-        coloraxis_showscale=False,
-        xaxis=dict(
-            showgrid=True,
-            gridcolor='rgba(255,255,255,0.2)',
-            range=[df['weight'].min() - 0.1, df['weight'].max() + 0.3]  # Add padding
-        ),
-        yaxis=dict(
-            showgrid=False,
-            categoryorder='total ascending'
-        ),
-        margin=dict(l=10, r=30, t=50, b=50),
-        height=max(300, min(500, 100 + 30 * len(df)))  # Dynamic height based on item count
-    )
+    # If we have theme data, create a grouped visualization
+    if themes:
+        # Create a figure with multiple subplots
+        fig = go.Figure()
+        
+        # Add main bar chart
+        fig.add_trace(go.Bar(
+            y=df.tail(15)['keyword'],
+            x=df.tail(15)['weight'],
+            orientation='h',
+            name='All Keywords',
+            marker=dict(
+                color=df.tail(15)['weight'],
+                colorscale=[
+                    [0, 'rgb(70, 100, 170)'],
+                    [0.5, 'rgb(45, 130, 200)'],
+                    [1, 'rgb(30, 170, 190)']
+                ]
+            ),
+            text=df.tail(15)['weight'],
+            texttemplate='%{text:.1f}',
+            textposition='outside',
+            hovertemplate='<b>%{y}</b><br>Weight: %{x:.2f}<extra></extra>'
+        ))
+        
+        # Add theme annotations
+        annotations = []
+        for i, (theme, theme_keywords) in enumerate(themes.items()):
+            if theme and theme != "General" and len(theme_keywords) >= 2:
+                # Sort keywords by weight
+                sorted_theme_keywords = sorted(theme_keywords, key=lambda x: x[1], reverse=True)
+                
+                # Add annotation
+                theme_text = f"<b>{theme}</b>: {', '.join(kw for kw, _ in sorted_theme_keywords[:3])}"
+                if len(sorted_theme_keywords) > 3:
+                    theme_text += f" and {len(sorted_theme_keywords)-3} more"
+                
+                annotations.append(dict(
+                    x=0,
+                    y=-0.15 - (i * 0.07),
+                    xref="paper",
+                    yref="paper",
+                    text=theme_text,
+                    showarrow=False,
+                    font=dict(color='white', size=12)
+                ))
+        
+        # Improve formatting and style
+        fig.update_layout(
+            title="Key Topics by Relevance",
+            yaxis_title="",
+            xaxis_title="Relevance",
+            showlegend=False,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font={'color': 'white', 'family': 'Arial'},
+            annotations=annotations,
+            xaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(255,255,255,0.2)',
+                range=[df['weight'].min() - 0.1, df['weight'].max() + 0.3]
+            ),
+            yaxis=dict(
+                showgrid=False,
+                categoryorder='total ascending'
+            ),
+            margin=dict(l=10, r=30, t=50, b=100 + 20 * min(len(themes), 4)),  # Adjust bottom margin for annotations
+            height=max(300, min(500, 100 + 30 * len(df.tail(15))))  # Dynamic height based on item count
+        )
+        
+    else:
+        # Create a standard horizontal bar chart with gradient color scheme
+        fig = px.bar(
+            df.tail(15),  # Show only top 15 keywords
+            y='keyword',
+            x='weight',
+            orientation='h',
+            title='Key Topics by Relevance',
+            color='weight',
+            color_continuous_scale=[
+                [0, 'rgb(70, 100, 170)'],
+                [0.5, 'rgb(45, 130, 200)'],
+                [1, 'rgb(30, 170, 190)']
+            ],
+            text='weight'
+        )
+        
+        # Format the weight values in the text to 1 decimal place
+        fig.update_traces(
+            texttemplate='%{text:.1f}',
+            textposition='outside',
+            cliponaxis=False,
+            hovertemplate='<b>%{y}</b><br>Weight: %{x:.2f}<extra></extra>'
+        )
+        
+        # Improve formatting and style
+        fig.update_layout(
+            yaxis_title="",
+            xaxis_title="Relevance",
+            showlegend=False,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font={'color': 'white', 'family': 'Arial'},
+            coloraxis_showscale=False,
+            xaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(255,255,255,0.2)',
+                range=[df['weight'].min() - 0.1, df['weight'].max() + 0.3]  # Add padding
+            ),
+            yaxis=dict(
+                showgrid=False,
+                categoryorder='total ascending'
+            ),
+            margin=dict(l=10, r=30, t=50, b=50),
+            height=max(300, min(500, 100 + 30 * len(df.tail(15))))  # Dynamic height based on item count
+        )
     
     return fig
