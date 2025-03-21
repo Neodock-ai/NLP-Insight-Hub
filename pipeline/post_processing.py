@@ -13,32 +13,33 @@ def format_summary(summary):
 
 def format_sentiment(sentiment):
     """
-    Formats the sentiment analysis output.
+    Formats the sentiment analysis output using markdown instead of HTML.
     """
     sentiment = sentiment.strip().lower()
     
     # Create a more visual representation
     if "positive" in sentiment:
         emoji = "😃"
-        color = "green"
         sentiment_text = "Positive"
     elif "negative" in sentiment:
         emoji = "😞"
-        color = "red"
         sentiment_text = "Negative"
     else:
         emoji = "😐"
-        color = "gray"
         sentiment_text = "Neutral"
     
-    # Use markdown instead of HTML tags
-    return f"""
-    ## Sentiment Analysis
-    
-    Overall sentiment: **{sentiment_text}** {emoji}
-    
-    *Note: This is an automated sentiment analysis and may not capture nuanced emotions.*
-    """
+    # Use only markdown, no HTML tags
+    return {
+        "text": f"""
+        ## Sentiment Analysis
+        
+        Overall sentiment: **{sentiment_text}** {emoji}
+        
+        *Note: This is an automated sentiment analysis and may not capture nuanced emotions.*
+        """,
+        "sentiment": sentiment_text,
+        "emoji": emoji
+    }
 
 def format_keywords(keywords):
     """
