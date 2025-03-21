@@ -269,7 +269,7 @@ class LlamaModel:
             
             # Check if summary is too short, low quality, or not meaningful
             is_low_quality = len(summary.split()) < 10 or len(summary) < 50
-            has_incomplete_sentence = re.search(r'[a-zA-Z]
+            has_incomplete_sentence = re.search(r'[a-zA-Z]$', summary) is not None
 
     def _analyze_sentiment_advanced(self, text, result):
         """
