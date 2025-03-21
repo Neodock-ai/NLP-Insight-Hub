@@ -1003,7 +1003,9 @@ class LlamaModel:
             "okay", "right", "wrong", "good", "bad", "sure", "come", "go", "know", "think", "see", "look", 
             "want", "need", "try", "put", "take"
         }
-, summary) is not None
+            # Check summary quality
+            is_low_quality = self._is_low_quality(summary)
+            has_incomplete_sentence = self._has_incomplete_sentence(summary)
             has_repetition = self._has_excessive_repetition(summary)
             
             if is_low_quality or has_incomplete_sentence or has_repetition:
@@ -1043,17 +1045,7 @@ class LlamaModel:
             }
             
             return enhanced_summary
-        except Exception as e:
-            logger.error(f"Error in post-processing summary: {str(e)}")
-            # Return basic summary if processing fails
-            return {
-                "text": summary,
-                "topics": [],
-                "readability": {"score": 0},
-                "coverage": 0,
-                "word_count": len(summary.split()),
-                "compression_ratio": 0
-            }
+
     
     def _has_excessive_repetition(self, text):
         """
