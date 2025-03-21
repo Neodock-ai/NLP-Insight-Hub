@@ -287,24 +287,24 @@ class LlamaModel:
     
     def _post_process_summary(self, summary, original_text):
         """
-        Improve the quality of the generated summary by fixing formatting issues,
-        detecting incomplete sentences, and removing excessive repetition.
+        Enhance the generated summary with advanced post-processing techniques
+        for better coherence, completeness, and readability.
         
         Args:
             summary (str): The raw summary from the model
             original_text (str): The original text being summarized
             
         Returns:
-            str: Enhanced and properly formatted summary
+            dict: Enhanced summary with metadata
         """
         try:
             # Clean up the summary
             summary = summary.strip()
             
-            # Remove any repeat of "Summary:" in the output
+            # Remove any prefixes like "Summary:" in the output
             summary = re.sub(r'^(Summary:?\s*)', '', summary, flags=re.IGNORECASE)
             
-            # Check if summary is too short, has incomplete sentences, or has excessive repetition
+            # Check if summary is too short, low quality, or not meaningful
             is_low_quality = len(summary.split()) < 10 or len(summary) < 50
             has_incomplete_sentence = re.search(r'[a-zA-Z][^.!?]*$', summary) is not None
             has_repetition = self._has_excessive_repetition(summary)
@@ -326,10 +326,37 @@ class LlamaModel:
             # Ensure proper formatting and structure
             summary = self._improve_summary_formatting(summary)
             
-            return summary
+            # Extract key topics from the summary
+            key_topics = self._extract_summary_topics(summary, original_text)
+            
+            # Calculate readability metrics
+            readability_metrics = self._calculate_readability(summary)
+            
+            # Determine coverage score (how well the summary covers the original text)
+            coverage_score = self._calculate_coverage(summary, original_text)
+            
+            # Create rich summary object with metadata
+            enhanced_summary = {
+                "text": summary,
+                "topics": key_topics,
+                "readability": readability_metrics,
+                "coverage": coverage_score,
+                "word_count": len(summary.split()),
+                "compression_ratio": len(original_text.split()) / max(1, len(summary.split()))
+            }
+            
+            return enhanced_summary
         except Exception as e:
             logger.error(f"Error in post-processing summary: {str(e)}")
-            return summary  # Return original summary if processing fails
+            # Return basic summary if processing fails
+            return {
+                "text": summary,
+                "topics": [],
+                "readability": {"score": 0},
+                "coverage": 0,
+                "word_count": len(summary.split()),
+                "compression_ratio": 0
+            }
     
     def _generate_extractive_summary(self, text):
         """
@@ -475,19 +502,233 @@ class LlamaModel:
             
         return summary
     
+    def _extract_summary_topics(self, summary, original_text):
+        """
+        Extracts key topics from the summary for better insights.
+        
+        Args:
+            summary (str): The summary text
+            original_text (str): The original text
+            
+        Returns:
+            list: Key topics
+        """
+        # Extract potential topic words (nouns, often capitalized)
+        summary_words = summary.split()
+        original_words = original_text.split()
+        
+        # Filter for potential topic words (longer words, proper nouns, etc.)
+        potential_topics = []
+        
+        for word in summary_words:
+            # Skip small words and stopwords
+            if len(word) <= 3 or word.lower() in self._get_stopwords():
+                continue
+                
+            # Clean the word (remove punctuation)
+            clean_word = re.sub(r'[^\w]', '', word)
+            if not clean_word:
+                continue
+                
+            # Potential topic indicators:
+            is_proper_noun = clean_word[0].isupper() and not clean_word.isupper()
+            is_frequent = summary.lower().count(clean_word.lower()) > 1
+            is_in_original = original_text.lower().count(clean_word.lower()) > 2
+            
+            if is_proper_noun or is_frequent or is_in_original:
+                potential_topics.append(clean_word)
+                
+        # Count frequency
+        topic_freq = Counter(potential_topics)
+        
+        # Select top topics
+        top_topics = [topic for topic, _ in topic_freq.most_common(5)]
+        
+        return top_topics
+    
+    def _calculate_readability(self, text):
+        """
+        Calculates readability metrics for the summary.
+        
+        Args:
+            text (str): Text to analyze
+            
+        Returns:
+            dict: Readability metrics
+        """
+        # Simple Flesch Reading Ease score approximation
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        words = text.split()
+        syllables = self._count_syllables(text)
+        
+        # Avoid division by zero
+        if len(sentences) == 0 or len(words) == 0:
+            return {"score": 0, "grade_level": "Unknown", "complexity": "Unknown"}
+            
+        # Calculate averages
+        avg_sentence_length = len(words) / len(sentences)
+        avg_syllables_per_word = syllables / max(1, len(words))
+        
+        # Flesch Reading Ease score (higher is easier to read)
+        score = 206.835 - (1.015 * avg_sentence_length) - (84.6 * avg_syllables_per_word)
+        
+        # Determine grade level and complexity
+        if score >= 90:
+            grade_level = "5th grade"
+            complexity = "Very Easy"
+        elif score >= 80:
+            grade_level = "6th grade"
+            complexity = "Easy"
+        elif score >= 70:
+            grade_level = "7th grade"
+            complexity = "Fairly Easy"
+        elif score >= 60:
+            grade_level = "8th-9th grade"
+            complexity = "Standard"
+        elif score >= 50:
+            grade_level = "10th-12th grade"
+            complexity = "Fairly Difficult"
+        elif score >= 30:
+            grade_level = "College"
+            complexity = "Difficult"
+        else:
+            grade_level = "College Graduate"
+            complexity = "Very Difficult"
+            
+        return {
+            "score": round(score, 1),
+            "grade_level": grade_level,
+            "complexity": complexity
+        }
+    
+    def _count_syllables(self, text):
+        """
+        Estimates syllable count in text.
+        
+        Args:
+            text (str): Text to analyze
+            
+        Returns:
+            int: Estimated syllable count
+        """
+        # Simple heuristic for English syllable counting
+        text = text.lower()
+        text = re.sub(r'[^a-z]', ' ', text)
+        words = text.split()
+        
+        count = 0
+        for word in words:
+            word_count = 0
+            
+            # Count vowel groups as syllables
+            if len(word) <= 3:  # Short words often have just one syllable
+                word_count = 1
+            else:
+                # Count vowel groups
+                vowels = "aeiouy"
+                prev_is_vowel = False
+                for char in word:
+                    is_vowel = char in vowels
+                    if is_vowel and not prev_is_vowel:
+                        word_count += 1
+                    prev_is_vowel = is_vowel
+                
+                # Words ending in e often don't count that as a syllable
+                if word.endswith('e'):
+                    word_count -= 1
+                    
+                # Words ending with le usually add a syllable
+                if len(word) > 2 and word.endswith('le') and word[-3] not in vowels:
+                    word_count += 1
+                    
+                # Words ending with es or ed often don't add a syllable
+                if word.endswith(('es', 'ed')) and len(word) > 2 and word[-3] not in vowels:
+                    word_count -= 1
+                    
+                # Every word has at least one syllable
+                word_count = max(1, word_count)
+                
+            count += word_count
+            
+        return count
+    
+    def _calculate_coverage(self, summary, original_text):
+        """
+        Calculates how well the summary covers the main topics of the original text.
+        
+        Args:
+            summary (str): The summary text
+            original_text (str): The original text
+            
+        Returns:
+            float: Coverage score (0-1)
+        """
+        # Get important words from original text
+        original_words = re.findall(r'\b\w{4,}\b', original_text.lower())
+        word_freq = Counter(original_words)
+        
+        # Filter out stopwords
+        important_words = [(word, count) for word, count in word_freq.most_common(50)
+                            if word not in self._get_stopwords()]
+        
+        # Calculate coverage
+        summary_lower = summary.lower()
+        covered_count = 0
+        
+        for word, _ in important_words:
+            if word in summary_lower:
+                covered_count += 1
+                
+        # Calculate coverage percentage
+        coverage = covered_count / max(1, len(important_words))
+        
+        return round(coverage, 2)
+    
     def _analyze_sentiment_advanced(self, text, result):
         """
-        Enhanced sentiment analysis with better classification and confidence scores.
+        Enhanced sentiment analysis with advanced classification and confidence scoring.
+        
+        Args:
+            text (str): The input text
+            result (str): The raw model output
+            
+        Returns:
+            dict: Detailed sentiment analysis with classification, scores, aspects, and confidence
         """
         try:
             # Process the raw result to extract sentiment
             result_lower = result.lower()
             
-            # Initialize scores
+            # Initialize comprehensive scores
             sentiment_scores = {
                 "positive": 0.0,
                 "neutral": 0.0,
                 "negative": 0.0
+            }
+            
+            # Intensifiers that amplify sentiment
+            intensifiers = {
+                "very": 1.5, "extremely": 2.0, "incredibly": 2.0, "absolutely": 2.0,
+                "completely": 1.8, "totally": 1.8, "thoroughly": 1.7, "entirely": 1.7,
+                "highly": 1.6, "especially": 1.5, "particularly": 1.5, "remarkably": 1.6,
+                "quite": 1.3, "rather": 1.2, "somewhat": 0.7, "slightly": 0.5,
+                "a bit": 0.6, "a little": 0.6, "fairly": 1.1, "pretty": 1.3,
+                "really": 1.5, "truly": 1.7, "positively": 1.5, "negatively": 1.5
+            }
+            
+            # Domain-specific sentiment terms (can be customized per domain)
+            domain_lexicon = {
+                # Technology domain
+                "user-friendly": 1.5, "intuitive": 1.5, "responsive": 1.5, "fast": 1.5,
+                "slow": -1.5, "buggy": -1.5, "glitchy": -1.5, "crash": -1.5,
+                
+                # Customer service domain
+                "helpful": 1.5, "responsive": 1.5, "prompt": 1.5, "courteous": 1.5,
+                "rude": -1.8, "unhelpful": -1.5, "unresponsive": -1.5, "dismissive": -1.8,
+                
+                # Product quality domain
+                "durable": 1.5, "reliable": 1.6, "sturdy": 1.4, "well-made": 1.6,
+                "flimsy": -1.5, "unreliable": -1.7, "breaks": -1.5, "defective": -1.8
             }
             
             # Determine primary sentiment from model output
@@ -499,7 +740,7 @@ class LlamaModel:
                 if any(term in result_lower for term in ["somewhat", "slightly", "a bit", "mostly"]):
                     sentiment_scores["positive"] -= 0.2
                     sentiment_scores["neutral"] += 0.2
-                
+            
             elif "negative" in result_lower:
                 primary_sentiment = "Negative"
                 sentiment_scores["negative"] += 0.6
@@ -514,47 +755,136 @@ class LlamaModel:
                 sentiment_scores["neutral"] += 0.6
             
             # Analyze the text directly to confirm sentiment
-            pos_terms = ["good", "great", "excellent", "wonderful", "happy", "positive", 
-                         "love", "enjoy", "beneficial", "outstanding", "impressive", "best"]
-            
-            neg_terms = ["bad", "terrible", "awful", "poor", "negative", "horrible", 
-                         "hate", "dislike", "disappointing", "worst", "problem", "difficult"]
-            
-            # Count sentiment terms
             text_lower = text.lower()
-            pos_count = sum(1 for term in pos_terms if term in text_lower)
-            neg_count = sum(1 for term in neg_terms if term in text_lower)
             
-            # Adjust scores based on term counts
-            total_count = pos_count + neg_count
-            if total_count > 0:
-                # Factor in term counts, but don't override completely
-                term_positive = pos_count / total_count if total_count > 0 else 0.5
-                
-                # Only adjust by a portion to respect the model's output
-                sentiment_scores["positive"] += term_positive * 0.3
-                sentiment_scores["negative"] += (1 - term_positive) * 0.3
+            # Tokenize text into sentences for more granular analysis
+            sentences = re.split(r'(?<=[.!?])\s+', text_lower)
+            sentence_sentiments = []
             
-            # Account for negation
-            negations = ["not", "no", "never", "don't", "doesn't", "isn't", "aren't", "wasn't", "weren't"]
-            for neg in negations:
-                for pos in pos_terms:
-                    pattern = f"{neg} {pos}"
-                    if pattern in text_lower:
-                        # Reduce positive, increase negative
-                        sentiment_scores["positive"] -= 0.1
-                        sentiment_scores["negative"] += 0.1
+            # Extract aspects (nouns that have sentiment associated with them)
+            aspects = {}
+            
+            # Process each sentence for sentiment
+            for sentence in sentences:
+                # Skip very short sentences
+                if len(sentence.split()) < 3:
+                    continue
+                    
+                sentence_pos_score = 0
+                sentence_neg_score = 0
+                sentence_aspects = {}
                 
-                for neg_term in neg_terms:
-                    pattern = f"{neg} {neg_term}"
-                    if pattern in text_lower:
-                        # Reduce negative, increase positive
-                        sentiment_scores["negative"] -= 0.1
-                        sentiment_scores["positive"] += 0.1
+                words = sentence.split()
+                
+                # Process words for sentiment
+                for i, word in enumerate(words):
+                    # Check for sentiment terms
+                    sentiment_value = 0
+                    
+                    # Check positive lexicon
+                    if word in self.positive_lexicon:
+                        sentiment_value = self.positive_lexicon[word]
+                        
+                        # Check for preceding intensifiers
+                        if i > 0 and words[i-1] in intensifiers:
+                            sentiment_value *= intensifiers[words[i-1]]
+                            
+                        sentence_pos_score += sentiment_value
+                        
+                        # Try to associate with nearby nouns as aspects
+                        self._associate_aspect(words, i, sentiment_value, sentence_aspects)
+                        
+                    # Check negative lexicon
+                    elif word in self.negative_lexicon:
+                        sentiment_value = -self.negative_lexicon[word]
+                        
+                        # Check for preceding intensifiers
+                        if i > 0 and words[i-1] in intensifiers:
+                            sentiment_value *= intensifiers[words[i-1]]
+                            
+                        sentence_neg_score += sentiment_value
+                        
+                        # Try to associate with nearby nouns as aspects
+                        self._associate_aspect(words, i, sentiment_value, sentence_aspects)
+                        
+                    # Check domain-specific lexicon
+                    elif word in domain_lexicon:
+                        sentiment_value = domain_lexicon[word]
+                        
+                        # Check for preceding intensifiers
+                        if i > 0 and words[i-1] in intensifiers:
+                            sentiment_value *= intensifiers[words[i-1]]
+                            
+                        if sentiment_value > 0:
+                            sentence_pos_score += sentiment_value
+                        else:
+                            sentence_neg_score += -sentiment_value
+                            
+                        # Try to associate with nearby nouns as aspects
+                        self._associate_aspect(words, i, sentiment_value, sentence_aspects)
+                
+                # Account for negation in the sentence
+                if any(neg in sentence for neg in ["not", "no", "never", "don't", "doesn't", "isn't", "aren't", "wasn't", "weren't", "haven't", "hasn't", "hadn't", "can't", "couldn't", "shouldn't", "wouldn't"]):
+                    # Look for specific negation patterns
+                    negated_pos = self._find_negated_terms(sentence, self.positive_lexicon.keys())
+                    negated_neg = self._find_negated_terms(sentence, self.negative_lexicon.keys())
+                    
+                    # Adjust scores based on negated terms
+                    for term, weight in negated_pos:
+                        sentence_pos_score -= weight  # Reduce positive score
+                        sentence_neg_score += weight * 0.7  # Add to negative, but with slightly less weight
+                        
+                    for term, weight in negated_neg:
+                        sentence_neg_score -= weight  # Reduce negative score
+                        sentence_pos_score += weight * 0.7  # Add to positive, but with slightly less weight
+                
+                # Calculate sentence sentiment
+                total_score = sentence_pos_score - sentence_neg_score
+                
+                if total_score > 0.5:
+                    sentence_sentiment = "Positive"
+                elif total_score < -0.5:
+                    sentence_sentiment = "Negative"
+                else:
+                    sentence_sentiment = "Neutral"
+                    
+                # Add to sentence sentiments
+                sentence_sentiments.append({
+                    "text": sentence,
+                    "sentiment": sentence_sentiment,
+                    "score": total_score
+                })
+                
+                # Merge sentence aspects into overall aspects
+                for aspect, value in sentence_aspects.items():
+                    if aspect in aspects:
+                        aspects[aspect] += value
+                    else:
+                        aspects[aspect] = value
+            
+            # Calculate overall sentiment scores from sentence analysis
+            sentence_count = len(sentence_sentiments)
+            positive_sentences = sum(1 for s in sentence_sentiments if s["sentiment"] == "Positive")
+            negative_sentences = sum(1 for s in sentence_sentiments if s["sentiment"] == "Negative")
+            neutral_sentences = sentence_count - positive_sentences - negative_sentences
+            
+            # Combine model-based and text-based sentiment scores (weighted)
+            model_weight = 0.4
+            text_weight = 0.6
+            
+            if sentence_count > 0:
+                text_positive = positive_sentences / sentence_count
+                text_negative = negative_sentences / sentence_count
+                text_neutral = neutral_sentences / sentence_count
+                
+                # Update scores with weighted combination
+                sentiment_scores["positive"] = (sentiment_scores["positive"] * model_weight) + (text_positive * text_weight)
+                sentiment_scores["negative"] = (sentiment_scores["negative"] * model_weight) + (text_negative * text_weight)
+                sentiment_scores["neutral"] = (sentiment_scores["neutral"] * model_weight) + (text_neutral * text_weight)
             
             # Normalize scores to sum to 1.0
             total_score = sum(sentiment_scores.values())
-            if total_score != 0:
+            if total_score > 0:
                 for key in sentiment_scores:
                     sentiment_scores[key] /= total_score
             
@@ -569,6 +899,20 @@ class LlamaModel:
             else:
                 sentiment_classification = "Neutral"
             
+            # Calculate confidence level
+            confidence = max(sentiment_scores.values())
+            
+            # Sort aspects by absolute value of sentiment
+            sorted_aspects = sorted(
+                aspects.items(),
+                key=lambda x: abs(x[1]),
+                reverse=True
+            )
+            
+            # Take top aspects
+            top_aspects = sorted_aspects[:min(5, len(sorted_aspects))]
+            aspect_results = {aspect: score for aspect, score in top_aspects}
+            
             # Get explanation from result if available
             explanation = ""
             if "because" in result_lower or "due to" in result_lower or "as it" in result_lower:
@@ -576,94 +920,14 @@ class LlamaModel:
                 if explanation_match:
                     explanation = explanation_match.group(2).strip()
             
+            # Extract key phrases that influenced sentiment
+            key_phrases = self._extract_sentiment_key_phrases(sentence_sentiments)
+            
             return {
                 "sentiment": sentiment_classification,
                 "scores": sentiment_scores,
+                "confidence": confidence,
+                "aspects": aspect_results,
                 "explanation": explanation,
-                "confidence": max(sentiment_scores.values())
+                "key_phrases": key_phrases
             }
-        except Exception as e:
-            logger.error(f"Error in sentiment analysis: {str(e)}")
-            return {
-                "sentiment": "Neutral",
-                "scores": {"neutral": 1.0, "positive": 0.0, "negative": 0.0},
-                "explanation": f"Error during analysis: {str(e)}",
-                "confidence": 0.7
-            }
-    
-    def _extract_keywords_advanced(self, text, result):
-        """
-        Enhanced keyword extraction with better relevance scoring and categorization.
-        """
-        try:
-            # Try to extract keywords from the model result first
-            keywords = []
-            
-            # Check if result contains comma-separated keywords
-            if "," in result:
-                # Split by commas and clean
-                keywords = [k.strip() for k in result.split(",") if k.strip()]
-            
-            # If we don't have enough keywords, extract from text
-            if len(keywords) < 10:
-                # Preprocess text
-                clean_text = ' '.join(re.findall(r'\b\w+\b', text.lower()))
-                words = clean_text.split()
-                
-                # Remove stopwords
-                stopwords = self._get_enhanced_stopwords()
-                filtered_words = [w for w in words if w not in stopwords and len(w) > 3]
-                
-                # Get word frequencies
-                word_freq = Counter(filtered_words)
-                
-                # Extract bigrams (two-word phrases)
-                bigrams = []
-                for i in range(len(words) - 1):
-                    if (words[i] not in stopwords and words[i+1] not in stopwords and
-                        len(words[i]) > 2 and len(words[i+1]) > 2):
-                        bigram = f"{words[i]} {words[i+1]}"
-                        bigrams.append(bigram)
-                
-                bigram_freq = Counter(bigrams)
-                
-                # Combine unigrams and bigrams with weights
-                # Bigrams generally get higher weights
-                candidates = []
-                for word, count in word_freq.most_common(20):
-                    # Base score is frequency
-                    score = count
-                    
-                    # Adjust by word length (longer words often more meaningful)
-                    length_factor = min(2.0, len(word) / 4)
-                    
-                    # Final word score
-                    candidates.append((word, score * length_factor))
-                
-                for bigram, count in bigram_freq.most_common(15):
-                    # Bigrams get a boost
-                    candidates.append((bigram, count * 2.0))
-                
-                # Sort by score and take top candidates
-                candidates.sort(key=lambda x: x[1], reverse=True)
-                extracted_keywords = [c[0] for c in candidates[:15]]
-                
-                # Add any extracted keywords that aren't already in our list
-                for kw in extracted_keywords:
-                    if kw not in keywords:
-                        keywords.append(kw)
-            
-            # Ensure proper casing for keywords
-            proper_case_keywords = []
-            for keyword in keywords:
-                # Try to find the keyword with proper casing in the original text
-                keyword_lower = keyword.lower()
-                pattern = re.compile(r'\b' + re.escape(keyword_lower) + r'\b', re.IGNORECASE)
-                matches = pattern.findall(text)
-                
-                if matches:
-                    # Use the most common case
-                    case_counter = Counter(matches)
-                    proper_case_keywords.append(case_counter.most_common(1)[0][0])
-                else:
-                    proper_case_keywords.append(keyword)
