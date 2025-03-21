@@ -15,6 +15,56 @@ class LlamaModel:
             self.tokenizer = AutoTokenizer.from_pretrained("t5-small")
             self.model = AutoModelForSeq2SeqLM.from_pretrained("t5-small")
             self.name = "Llama"
+            
+            # Initialize sentiment lexicons as class variables for reuse
+            self.positive_lexicon = {
+                # Strong positive indicators (weight 2.0)
+                "excellent": 2.0, "outstanding": 2.0, "exceptional": 2.0, "superb": 2.0,
+                "perfect": 2.0, "brilliant": 2.0, "fantastic": 2.0, "extraordinary": 2.0,
+                "wonderful": 2.0, "amazing": 2.0, "incredible": 2.0, "phenomenal": 2.0,
+                
+                # Moderate positive indicators (weight 1.5)
+                "great": 1.5, "impressive": 1.5, "terrific": 1.5, "awesome": 1.5, 
+                "delightful": 1.5, "favorable": 1.5, "remarkable": 1.5, "splendid": 1.5,
+                "admirable": 1.5, "marvelous": 1.5, "excellent": 1.5,
+                
+                # Standard positive indicators (weight 1.0)
+                "good": 1.0, "nice": 1.0, "positive": 1.0, "satisfactory": 1.0, 
+                "pleasing": 1.0, "pleasant": 1.0, "enjoy": 1.0, "happy": 1.0,
+                "glad": 1.0, "pleased": 1.0, "thankful": 1.0, "grateful": 1.0,
+                "satisfied": 1.0, "like": 1.0, "love": 1.0, "appreciate": 1.0,
+                "beneficial": 1.0, "helpful": 1.0, "useful": 1.0, "valuable": 1.0,
+                
+                # Mild positive indicators (weight 0.5)
+                "decent": 0.5, "fine": 0.5, "acceptable": 0.5, "adequate": 0.5,
+                "sufficient": 0.5, "fair": 0.5, "reasonable": 0.5, "better": 0.5,
+                "improvement": 0.5, "improved": 0.5, "recommend": 0.5, "worth": 0.5
+            }
+            
+            self.negative_lexicon = {
+                # Strong negative indicators (weight 2.0)
+                "terrible": 2.0, "horrible": 2.0, "awful": 2.0, "dreadful": 2.0,
+                "abysmal": 2.0, "atrocious": 2.0, "appalling": 2.0, "disastrous": 2.0,
+                "catastrophic": 2.0, "horrendous": 2.0, "unbearable": 2.0, "intolerable": 2.0,
+                
+                # Moderate negative indicators (weight 1.5)
+                "bad": 1.5, "poor": 1.5, "disappointing": 1.5, "frustrating": 1.5,
+                "annoying": 1.5, "irritating": 1.5, "unpleasant": 1.5, "unfavorable": 1.5,
+                "inferior": 1.5, "unsatisfactory": 1.5, "subpar": 1.5, "unacceptable": 1.5,
+                
+                # Standard negative indicators (weight 1.0)
+                "negative": 1.0, "problem": 1.0, "issue": 1.0, "concern": 1.0,
+                "trouble": 1.0, "difficult": 1.0, "hard": 1.0, "challenging": 1.0,
+                "dislike": 1.0, "hate": 1.0, "upset": 1.0, "sad": 1.0,
+                "angry": 1.0, "mad": 1.0, "unhappy": 1.0, "disappointed": 1.0,
+                "failure": 1.0, "failed": 1.0, "fail": 1.0, "broken": 1.0,
+                
+                # Mild negative indicators (weight 0.5)
+                "slow": 0.5, "inconvenient": 0.5, "inconsistent": 0.5, "mediocre": 0.5,
+                "overpriced": 0.5, "expensive": 0.5, "lacking": 0.5, "limited": 0.5,
+                "confusing": 0.5, "uncomfortable": 0.5, "underwhelming": 0.5, "unfortunate": 0.5
+            }
+            
         except Exception as e:
             logger.error(f"Error initializing LlamaModel: {str(e)}")
             raise
@@ -258,40 +308,298 @@ class LlamaModel:
             logger.error(f"Error in post-processing summary: {str(e)}")
             return summary  # Return original summary if processing fails
 
-    def _find_negated_terms(self, text, term_list):
-    """
-    Finds terms that are negated in the text and returns them with their weights.
-    
-    Args:
-        text (str): The input text
-        term_list (list): List of terms to check for negation
+    def _analyze_sentiment_advanced(self, text, result):
+        """
+        Enhanced sentiment analysis with advanced classification and confidence scoring.
         
-    Returns:
-        list: List of (term, weight) tuples for negated terms
-    """
-    negated_terms = []
-    negators = ["not", "no", "never", "don't", "doesn't", "isn't", "aren't", 
-                "wasn't", "weren't", "haven't", "hasn't", "hadn't", "can't", 
-                "couldn't", "shouldn't", "wouldn't"]
-    
-    # Check each term
-    for term in term_list:
-        for negator in negators:
-            # Look for patterns like "not good", "isn't excellent", etc.
-            pattern = r'\b' + re.escape(negator) + r'\b[^.!?]*?\b' + re.escape(term) + r'\b'
-            if re.search(pattern, text):
-                # Get the term's weight (assumed to be in a lexicon)
-                weight = 0
-                if term in self.positive_lexicon:
-                    weight = self.positive_lexicon[term]
-                elif term in self.negative_lexicon:
-                    weight = self.negative_lexicon[term]
+        Args:
+            text (str): The input text
+            result (str): The raw model output
+            
+        Returns:
+            dict: Detailed sentiment analysis with classification, scores, aspects, and confidence
+        """
+        try:
+            # Process the raw result to extract sentiment
+            result_lower = result.lower()
+            
+            # Initialize comprehensive scores
+            sentiment_scores = {
+                "positive": 0.0,
+                "neutral": 0.0,
+                "negative": 0.0
+            }
+            
+            # Intensifiers that amplify sentiment
+            intensifiers = {
+                "very": 1.5, "extremely": 2.0, "incredibly": 2.0, "absolutely": 2.0,
+                "completely": 1.8, "totally": 1.8, "thoroughly": 1.7, "entirely": 1.7,
+                "highly": 1.6, "especially": 1.5, "particularly": 1.5, "remarkably": 1.6,
+                "quite": 1.3, "rather": 1.2, "somewhat": 0.7, "slightly": 0.5,
+                "a bit": 0.6, "a little": 0.6, "fairly": 1.1, "pretty": 1.3,
+                "really": 1.5, "truly": 1.7, "positively": 1.5, "negatively": 1.5
+            }
+            
+            # Domain-specific sentiment terms (can be customized per domain)
+            domain_lexicon = {
+                # Technology domain
+                "user-friendly": 1.5, "intuitive": 1.5, "responsive": 1.5, "fast": 1.5,
+                "slow": -1.5, "buggy": -1.5, "glitchy": -1.5, "crash": -1.5,
+                
+                # Customer service domain
+                "helpful": 1.5, "responsive": 1.5, "prompt": 1.5, "courteous": 1.5,
+                "rude": -1.8, "unhelpful": -1.5, "unresponsive": -1.5, "dismissive": -1.8,
+                
+                # Product quality domain
+                "durable": 1.5, "reliable": 1.6, "sturdy": 1.4, "well-made": 1.6,
+                "flimsy": -1.5, "unreliable": -1.7, "breaks": -1.5, "defective": -1.8
+            }
+            
+            # Determine primary sentiment from model output
+            if "positive" in result_lower:
+                primary_sentiment = "Positive"
+                sentiment_scores["positive"] += 0.6
+                
+                # Check for qualifiers that might reduce confidence
+                if any(term in result_lower for term in ["somewhat", "slightly", "a bit", "mostly"]):
+                    sentiment_scores["positive"] -= 0.2
+                    sentiment_scores["neutral"] += 0.2
+            
+            elif "negative" in result_lower:
+                primary_sentiment = "Negative"
+                sentiment_scores["negative"] += 0.6
+                
+                # Check for qualifiers
+                if any(term in result_lower for term in ["somewhat", "slightly", "a bit", "mostly"]):
+                    sentiment_scores["negative"] -= 0.2
+                    sentiment_scores["neutral"] += 0.2
+                    
+            else:
+                primary_sentiment = "Neutral"
+                sentiment_scores["neutral"] += 0.6
+            
+            # Analyze the text directly to confirm sentiment
+            text_lower = text.lower()
+            
+            # Tokenize text into sentences for more granular analysis
+            sentences = re.split(r'(?<=[.!?])\s+', text_lower)
+            sentence_sentiments = []
+            
+            # Extract aspects (nouns that have sentiment associated with them)
+            aspects = {}
+            
+            # Process each sentence for sentiment
+            for sentence in sentences:
+                # Skip very short sentences
+                if len(sentence.split()) < 3:
+                    continue
+                    
+                sentence_pos_score = 0
+                sentence_neg_score = 0
+                sentence_aspects = {}
+                
+                words = sentence.split()
+                
+                # Process words for sentiment
+                for i, word in enumerate(words):
+                    # Check for sentiment terms
+                    sentiment_value = 0
+                    
+                    # Check positive lexicon
+                    if word in self.positive_lexicon:
+                        sentiment_value = self.positive_lexicon[word]
+                        
+                        # Check for preceding intensifiers
+                        if i > 0 and words[i-1] in intensifiers:
+                            sentiment_value *= intensifiers[words[i-1]]
+                            
+                        sentence_pos_score += sentiment_value
+                        
+                        # Try to associate with nearby nouns as aspects
+                        self._associate_aspect(words, i, sentiment_value, sentence_aspects)
+                        
+                    # Check negative lexicon
+                    elif word in self.negative_lexicon:
+                        sentiment_value = -self.negative_lexicon[word]
+                        
+                        # Check for preceding intensifiers
+                        if i > 0 and words[i-1] in intensifiers:
+                            sentiment_value *= intensifiers[words[i-1]]
+                            
+                        sentence_neg_score += sentiment_value
+                        
+                        # Try to associate with nearby nouns as aspects
+                        self._associate_aspect(words, i, sentiment_value, sentence_aspects)
+                        
+                    # Check domain-specific lexicon
+                    elif word in domain_lexicon:
+                        sentiment_value = domain_lexicon[word]
+                        
+                        # Check for preceding intensifiers
+                        if i > 0 and words[i-1] in intensifiers:
+                            sentiment_value *= intensifiers[words[i-1]]
+                            
+                        if sentiment_value > 0:
+                            sentence_pos_score += sentiment_value
+                        else:
+                            sentence_neg_score += -sentiment_value
+                            
+                        # Try to associate with nearby nouns as aspects
+                        self._associate_aspect(words, i, sentiment_value, sentence_aspects)
+                
+                # Account for negation in the sentence
+                if any(neg in sentence for neg in ["not", "no", "never", "don't", "doesn't", "isn't", "aren't", "wasn't", "weren't", "haven't", "hasn't", "hadn't", "can't", "couldn't", "shouldn't", "wouldn't"]):
+                    # Look for specific negation patterns
+                    negated_pos = self._find_negated_terms(sentence, self.positive_lexicon.keys())
+                    negated_neg = self._find_negated_terms(sentence, self.negative_lexicon.keys())
+                    
+                    # Adjust scores based on negated terms
+                    for term, weight in negated_pos:
+                        sentence_pos_score -= weight  # Reduce positive score
+                        sentence_neg_score += weight * 0.7  # Add to negative, but with slightly less weight
+                        
+                    for term, weight in negated_neg:
+                        sentence_neg_score -= weight  # Reduce negative score
+                        sentence_pos_score += weight * 0.7  # Add to positive, but with slightly less weight
+                
+                # Calculate sentence sentiment
+                total_score = sentence_pos_score - sentence_neg_score
+                
+                if total_score > 0.5:
+                    sentence_sentiment = "Positive"
+                elif total_score < -0.5:
+                    sentence_sentiment = "Negative"
                 else:
-                    weight = 1.0  # Default weight
+                    sentence_sentiment = "Neutral"
+                    
+                # Add to sentence sentiments
+                sentence_sentiments.append({
+                    "text": sentence,
+                    "sentiment": sentence_sentiment,
+                    "score": total_score
+                })
                 
-                negated_terms.append((term, weight))
+                # Merge sentence aspects into overall aspects
+                for aspect, value in sentence_aspects.items():
+                    if aspect in aspects:
+                        aspects[aspect] += value
+                    else:
+                        aspects[aspect] = value
+            
+            # Calculate overall sentiment scores from sentence analysis
+            sentence_count = len(sentence_sentiments)
+            positive_sentences = sum(1 for s in sentence_sentiments if s["sentiment"] == "Positive")
+            negative_sentences = sum(1 for s in sentence_sentiments if s["sentiment"] == "Negative")
+            neutral_sentences = sentence_count - positive_sentences - negative_sentences
+            
+            # Combine model-based and text-based sentiment scores (weighted)
+            model_weight = 0.4
+            text_weight = 0.6
+            
+            if sentence_count > 0:
+                text_positive = positive_sentences / sentence_count
+                text_negative = negative_sentences / sentence_count
+                text_neutral = neutral_sentences / sentence_count
                 
-    return negated_terms
+                # Update scores with weighted combination
+                sentiment_scores["positive"] = (sentiment_scores["positive"] * model_weight) + (text_positive * text_weight)
+                sentiment_scores["negative"] = (sentiment_scores["negative"] * model_weight) + (text_negative * text_weight)
+                sentiment_scores["neutral"] = (sentiment_scores["neutral"] * model_weight) + (text_neutral * text_weight)
+            
+            # Normalize scores to sum to 1.0
+            total_score = sum(sentiment_scores.values())
+            if total_score > 0:
+                for key in sentiment_scores:
+                    sentiment_scores[key] /= total_score
+            
+            # Determine final sentiment based on highest score
+            final_sentiment = max(sentiment_scores, key=sentiment_scores.get)
+            
+            # Format the output
+            if final_sentiment == "positive":
+                sentiment_classification = "Positive"
+            elif final_sentiment == "negative":
+                sentiment_classification = "Negative"
+            else:
+                sentiment_classification = "Neutral"
+            
+            # Calculate confidence level
+            confidence = max(sentiment_scores.values())
+            
+            # Sort aspects by absolute value of sentiment
+            sorted_aspects = sorted(
+                aspects.items(),
+                key=lambda x: abs(x[1]),
+                reverse=True
+            )
+            
+            # Take top aspects
+            top_aspects = sorted_aspects[:min(5, len(sorted_aspects))]
+            aspect_results = {aspect: score for aspect, score in top_aspects}
+            
+            # Get explanation from result if available
+            explanation = ""
+            if "because" in result_lower or "due to" in result_lower or "as it" in result_lower:
+                explanation_match = re.search(r'(because|due to|as it)(.+)', result_lower)
+                if explanation_match:
+                    explanation = explanation_match.group(2).strip()
+            
+            # Extract key phrases that influenced sentiment
+            key_phrases = self._extract_sentiment_key_phrases(sentence_sentiments)
+            
+            return {
+                "sentiment": sentiment_classification,
+                "scores": sentiment_scores,
+                "confidence": confidence,
+                "aspects": aspect_results,
+                "explanation": explanation,
+                "key_phrases": key_phrases
+            }
+        except Exception as e:
+            logger.error(f"Error in sentiment analysis: {str(e)}")
+            return {
+                "sentiment": "Neutral",
+                "scores": {"neutral": 1.0, "positive": 0.0, "negative": 0.0},
+                "confidence": 0.6,
+                "aspects": {},
+                "explanation": f"Error during analysis: {str(e)}",
+                "key_phrases": []
+            }
+    
+    def _find_negated_terms(self, text, term_list):
+        """
+        Finds terms that are negated in the text and returns them with their weights.
+        
+        Args:
+            text (str): The input text
+            term_list (list): List of terms to check for negation
+            
+        Returns:
+            list: List of (term, weight) tuples for negated terms
+        """
+        negated_terms = []
+        negators = ["not", "no", "never", "don't", "doesn't", "isn't", "aren't", 
+                    "wasn't", "weren't", "haven't", "hasn't", "hadn't", "can't", 
+                    "couldn't", "shouldn't", "wouldn't"]
+        
+        # Check each term
+        for term in term_list:
+            for negator in negators:
+                # Look for patterns like "not good", "isn't excellent", etc.
+                pattern = r'\b' + re.escape(negator) + r'\b[^.!?]*?\b' + re.escape(term) + r'\b'
+                if re.search(pattern, text):
+                    # Get the term's weight (assumed to be in a lexicon)
+                    weight = 0
+                    if term in self.positive_lexicon:
+                        weight = self.positive_lexicon[term]
+                    elif term in self.negative_lexicon:
+                        weight = self.negative_lexicon[term]
+                    else:
+                        weight = 1.0  # Default weight
+                    
+                    negated_terms.append((term, weight))
+                    
+        return negated_terms
 
     def _associate_aspect(self, words, sentiment_word_index, sentiment_value, aspects_dict):
         """
@@ -385,316 +693,17 @@ class LlamaModel:
         # If no sentiment word found, return the first part of the sentence
         return " ".join(words[:min(10, len(words))])
     
-    def _analyze_sentiment_advanced(self, text, result):
-    """
-    Enhanced sentiment analysis with advanced classification and confidence scoring.
-    
-    Args:
-        text (str): The input text
-        result (str): The raw model output
-        
-    Returns:
-        dict: Detailed sentiment analysis with classification, scores, aspects, and confidence
-    """
-    try:
-        # Process the raw result to extract sentiment
-        result_lower = result.lower()
-        
-        # Initialize comprehensive scores
-        sentiment_scores = {
-            "positive": 0.0,
-            "neutral": 0.0,
-            "negative": 0.0
-        }
-        
-        # Enhanced sentiment lexicons with weights
-        positive_lexicon = {
-            # Strong positive indicators (weight 2.0)
-            "excellent": 2.0, "outstanding": 2.0, "exceptional": 2.0, "superb": 2.0,
-            "perfect": 2.0, "brilliant": 2.0, "fantastic": 2.0, "extraordinary": 2.0,
-            "wonderful": 2.0, "amazing": 2.0, "incredible": 2.0, "phenomenal": 2.0,
-            
-            # Moderate positive indicators (weight 1.5)
-            "great": 1.5, "impressive": 1.5, "terrific": 1.5, "awesome": 1.5, 
-            "delightful": 1.5, "favorable": 1.5, "remarkable": 1.5, "splendid": 1.5,
-            "admirable": 1.5, "marvelous": 1.5, "excellent": 1.5,
-            
-            # Standard positive indicators (weight 1.0)
-            "good": 1.0, "nice": 1.0, "positive": 1.0, "satisfactory": 1.0, 
-            "pleasing": 1.0, "pleasant": 1.0, "enjoy": 1.0, "happy": 1.0,
-            "glad": 1.0, "pleased": 1.0, "thankful": 1.0, "grateful": 1.0,
-            "satisfied": 1.0, "like": 1.0, "love": 1.0, "appreciate": 1.0,
-            "beneficial": 1.0, "helpful": 1.0, "useful": 1.0, "valuable": 1.0,
-            
-            # Mild positive indicators (weight 0.5)
-            "decent": 0.5, "fine": 0.5, "acceptable": 0.5, "adequate": 0.5,
-            "sufficient": 0.5, "fair": 0.5, "reasonable": 0.5, "better": 0.5,
-            "improvement": 0.5, "improved": 0.5, "recommend": 0.5, "worth": 0.5
-        }
-        
-        negative_lexicon = {
-            # Strong negative indicators (weight 2.0)
-            "terrible": 2.0, "horrible": 2.0, "awful": 2.0, "dreadful": 2.0,
-            "abysmal": 2.0, "atrocious": 2.0, "appalling": 2.0, "disastrous": 2.0,
-            "catastrophic": 2.0, "horrendous": 2.0, "unbearable": 2.0, "intolerable": 2.0,
-            
-            # Moderate negative indicators (weight 1.5)
-            "bad": 1.5, "poor": 1.5, "disappointing": 1.5, "frustrating": 1.5,
-            "annoying": 1.5, "irritating": 1.5, "unpleasant": 1.5, "unfavorable": 1.5,
-            "inferior": 1.5, "unsatisfactory": 1.5, "subpar": 1.5, "unacceptable": 1.5,
-            
-            # Standard negative indicators (weight 1.0)
-            "negative": 1.0, "problem": 1.0, "issue": 1.0, "concern": 1.0,
-            "trouble": 1.0, "difficult": 1.0, "hard": 1.0, "challenging": 1.0,
-            "dislike": 1.0, "hate": 1.0, "upset": 1.0, "sad": 1.0,
-            "angry": 1.0, "mad": 1.0, "unhappy": 1.0, "disappointed": 1.0,
-            "failure": 1.0, "failed": 1.0, "fail": 1.0, "broken": 1.0,
-            
-            # Mild negative indicators (weight 0.5)
-            "slow": 0.5, "inconvenient": 0.5, "inconsistent": 0.5, "mediocre": 0.5,
-            "overpriced": 0.5, "expensive": 0.5, "lacking": 0.5, "limited": 0.5,
-            "confusing": 0.5, "uncomfortable": 0.5, "underwhelming": 0.5, "unfortunate": 0.5
-        }
-        
-        # Intensifiers that amplify sentiment
-        intensifiers = {
-            "very": 1.5, "extremely": 2.0, "incredibly": 2.0, "absolutely": 2.0,
-            "completely": 1.8, "totally": 1.8, "thoroughly": 1.7, "entirely": 1.7,
-            "highly": 1.6, "especially": 1.5, "particularly": 1.5, "remarkably": 1.6,
-            "quite": 1.3, "rather": 1.2, "somewhat": 0.7, "slightly": 0.5,
-            "a bit": 0.6, "a little": 0.6, "fairly": 1.1, "pretty": 1.3,
-            "really": 1.5, "truly": 1.7, "positively": 1.5, "negatively": 1.5
-        }
-        
-        # Domain-specific sentiment terms (can be customized per domain)
-        domain_lexicon = {
-            # Technology domain
-            "user-friendly": 1.5, "intuitive": 1.5, "responsive": 1.5, "fast": 1.5,
-            "slow": -1.5, "buggy": -1.5, "glitchy": -1.5, "crash": -1.5,
-            
-            # Customer service domain
-            "helpful": 1.5, "responsive": 1.5, "prompt": 1.5, "courteous": 1.5,
-            "rude": -1.8, "unhelpful": -1.5, "unresponsive": -1.5, "dismissive": -1.8,
-            
-            # Product quality domain
-            "durable": 1.5, "reliable": 1.6, "sturdy": 1.4, "well-made": 1.6,
-            "flimsy": -1.5, "unreliable": -1.7, "breaks": -1.5, "defective": -1.8
-        }
-        
-        # Determine primary sentiment from model output
-        if "positive" in result_lower:
-            primary_sentiment = "Positive"
-            sentiment_scores["positive"] += 0.6
-            
-            # Check for qualifiers that might reduce confidence
-            if any(term in result_lower for term in ["somewhat", "slightly", "a bit", "mostly"]):
-                sentiment_scores["positive"] -= 0.2
-                sentiment_scores["neutral"] += 0.2
-            
-        elif "negative" in result_lower:
-            primary_sentiment = "Negative"
-            sentiment_scores["negative"] += 0.6
-            
-            # Check for qualifiers
-            if any(term in result_lower for term in ["somewhat", "slightly", "a bit", "mostly"]):
-                sentiment_scores["negative"] -= 0.2
-                sentiment_scores["neutral"] += 0.2
-                
-        else:
-            primary_sentiment = "Neutral"
-            sentiment_scores["neutral"] += 0.6
-        
-        # Analyze the text directly to confirm sentiment
-        text_lower = text.lower()
-        
-        # Tokenize text into sentences for more granular analysis
-        sentences = re.split(r'(?<=[.!?])\s+', text_lower)
-        sentence_sentiments = []
-        
-        # Extract aspects (nouns that have sentiment associated with them)
-        aspects = {}
-        
-        # Process each sentence for sentiment
-        for sentence in sentences:
-            # Skip very short sentences
-            if len(sentence.split()) < 3:
-                continue
-                
-            sentence_pos_score = 0
-            sentence_neg_score = 0
-            sentence_aspects = {}
-            
-            words = sentence.split()
-            
-            # Process words for sentiment
-            for i, word in enumerate(words):
-                # Check for sentiment terms
-                sentiment_value = 0
-                
-                # Check positive lexicon
-                if word in positive_lexicon:
-                    sentiment_value = positive_lexicon[word]
-                    
-                    # Check for preceding intensifiers
-                    if i > 0 and words[i-1] in intensifiers:
-                        sentiment_value *= intensifiers[words[i-1]]
-                        
-                    sentence_pos_score += sentiment_value
-                    
-                    # Try to associate with nearby nouns as aspects
-                    self._associate_aspect(words, i, sentiment_value, sentence_aspects)
-                    
-                # Check negative lexicon
-                elif word in negative_lexicon:
-                    sentiment_value = -negative_lexicon[word]
-                    
-                    # Check for preceding intensifiers
-                    if i > 0 and words[i-1] in intensifiers:
-                        sentiment_value *= intensifiers[words[i-1]]
-                        
-                    sentence_neg_score += sentiment_value
-                    
-                    # Try to associate with nearby nouns as aspects
-                    self._associate_aspect(words, i, sentiment_value, sentence_aspects)
-                    
-                # Check domain-specific lexicon
-                elif word in domain_lexicon:
-                    sentiment_value = domain_lexicon[word]
-                    
-                    # Check for preceding intensifiers
-                    if i > 0 and words[i-1] in intensifiers:
-                        sentiment_value *= intensifiers[words[i-1]]
-                        
-                    if sentiment_value > 0:
-                        sentence_pos_score += sentiment_value
-                    else:
-                        sentence_neg_score += -sentiment_value
-                        
-                    # Try to associate with nearby nouns as aspects
-                    self._associate_aspect(words, i, sentiment_value, sentence_aspects)
-            
-            # Account for negation in the sentence
-            if any(neg in sentence for neg in ["not", "no", "never", "don't", "doesn't", "isn't", "aren't", "wasn't", "weren't", "haven't", "hasn't", "hadn't", "can't", "couldn't", "shouldn't", "wouldn't"]):
-                # Look for specific negation patterns
-                negated_pos = self._find_negated_terms(sentence, positive_lexicon.keys())
-                negated_neg = self._find_negated_terms(sentence, negative_lexicon.keys())
-                
-                # Adjust scores based on negated terms
-                for term, weight in negated_pos:
-                    sentence_pos_score -= weight  # Reduce positive score
-                    sentence_neg_score += weight * 0.7  # Add to negative, but with slightly less weight
-                    
-                for term, weight in negated_neg:
-                    sentence_neg_score -= weight  # Reduce negative score
-                    sentence_pos_score += weight * 0.7  # Add to positive, but with slightly less weight
-            
-            # Calculate sentence sentiment
-            total_score = sentence_pos_score - sentence_neg_score
-            
-            if total_score > 0.5:
-                sentence_sentiment = "Positive"
-            elif total_score < -0.5:
-                sentence_sentiment = "Negative"
-            else:
-                sentence_sentiment = "Neutral"
-                
-            # Add to sentence sentiments
-            sentence_sentiments.append({
-                "text": sentence,
-                "sentiment": sentence_sentiment,
-                "score": total_score
-            })
-            
-            # Merge sentence aspects into overall aspects
-            for aspect, value in sentence_aspects.items():
-                if aspect in aspects:
-                    aspects[aspect] += value
-                else:
-                    aspects[aspect] = value
-        
-        # Calculate overall sentiment scores from sentence analysis
-        sentence_count = len(sentence_sentiments)
-        positive_sentences = sum(1 for s in sentence_sentiments if s["sentiment"] == "Positive")
-        negative_sentences = sum(1 for s in sentence_sentiments if s["sentiment"] == "Negative")
-        neutral_sentences = sentence_count - positive_sentences - negative_sentences
-        
-        # Combine model-based and text-based sentiment scores (weighted)
-        model_weight = 0.4
-        text_weight = 0.6
-        
-        if sentence_count > 0:
-            text_positive = positive_sentences / sentence_count
-            text_negative = negative_sentences / sentence_count
-            text_neutral = neutral_sentences / sentence_count
-            
-            # Update scores with weighted combination
-            sentiment_scores["positive"] = (sentiment_scores["positive"] * model_weight) + (text_positive * text_weight)
-            sentiment_scores["negative"] = (sentiment_scores["negative"] * model_weight) + (text_negative * text_weight)
-            sentiment_scores["neutral"] = (sentiment_scores["neutral"] * model_weight) + (text_neutral * text_weight)
-        
-        # Normalize scores to sum to 1.0
-        total_score = sum(sentiment_scores.values())
-        if total_score > 0:
-            for key in sentiment_scores:
-                sentiment_scores[key] /= total_score
-        
-        # Determine final sentiment based on highest score
-        final_sentiment = max(sentiment_scores, key=sentiment_scores.get)
-        
-        # Format the output
-        if final_sentiment == "positive":
-            sentiment_classification = "Positive"
-        elif final_sentiment == "negative":
-            sentiment_classification = "Negative"
-        else:
-            sentiment_classification = "Neutral"
-        
-        # Calculate confidence level
-        confidence = max(sentiment_scores.values())
-        
-        # Sort aspects by absolute value of sentiment
-        sorted_aspects = sorted(
-            aspects.items(),
-            key=lambda x: abs(x[1]),
-            reverse=True
-        )
-        
-        # Take top aspects
-        top_aspects = sorted_aspects[:min(5, len(sorted_aspects))]
-        aspect_results = {aspect: score for aspect, score in top_aspects}
-        
-        # Get explanation from result if available
-        explanation = ""
-        if "because" in result_lower or "due to" in result_lower or "as it" in result_lower:
-            explanation_match = re.search(r'(because|due to|as it)(.+)', result_lower)
-            if explanation_match:
-                explanation = explanation_match.group(2).strip()
-        
-        # Extract key phrases that influenced sentiment
-        key_phrases = self._extract_sentiment_key_phrases(sentence_sentiments)
-        
-        return {
-            "sentiment": sentiment_classification,
-            "scores": sentiment_scores,
-            "confidence": confidence,
-            "aspects": aspect_results,
-            "explanation": explanation,
-            "key_phrases": key_phrases
-        }
-    except Exception as e:
-        logger.error(f"Error in sentiment analysis: {str(e)}")
-        return {
-            "sentiment": "Neutral",
-            "scores": {"neutral": 1.0, "positive": 0.0, "negative": 0.0},
-            "confidence": 0.6,
-            "aspects": {},
-            "explanation": f"Error during analysis: {str(e)}",
-            "key_phrases": []
-        }        
-    
     def _extract_keywords_advanced(self, text, result):
         """
-        Enhanced keyword extraction with better relevance scoring.
+        Advanced keyword extraction with improved relevance scoring, topic modeling,
+        and semantic grouping for better insight generation.
+        
+        Args:
+            text (str): The input text
+            result (str): The raw model output
+            
+        Returns:
+            list: Enhanced keyword data with weights, categories, and metadata
         """
         try:
             # Try to extract keywords from the model result first
@@ -705,58 +714,102 @@ class LlamaModel:
                 # Split by commas and clean
                 keywords = [k.strip() for k in result.split(",") if k.strip()]
             
-            # If we don't have enough keywords, extract from text
-            if len(keywords) < 10:
-                # Preprocess text
-                clean_text = ' '.join(re.findall(r'\b\w+\b', text.lower()))
-                words = clean_text.split()
-                
-                # Remove stopwords
-                stopwords = self._get_stopwords()
-                filtered_words = [w for w in words if w not in stopwords and len(w) > 3]
-                
-                # Get word frequencies
-                word_freq = Counter(filtered_words)
-                
-                # Extract bigrams (two-word phrases)
-                bigrams = []
-                for i in range(len(words) - 1):
-                    if (words[i] not in stopwords and words[i+1] not in stopwords and
-                        len(words[i]) > 2 and len(words[i+1]) > 2):
-                        bigram = f"{words[i]} {words[i+1]}"
-                        bigrams.append(bigram)
-                
-                bigram_freq = Counter(bigrams)
-                
-                # Combine unigrams and bigrams with weights
-                # Bigrams generally get higher weights
+            # Get clean text for extraction
+            clean_text = ' '.join(re.findall(r'\b\w+\b', text.lower()))
+            words = clean_text.split()
+            
+            # Remove stopwords with an expanded set
+            stopwords = self._get_enhanced_stopwords()
+            filtered_words = [w for w in words if w not in stopwords and len(w) > 3]
+            
+            # Get word frequencies with context-based weighting
+            word_freq = Counter(filtered_words)
+            
+            # Extract n-grams (2-3 word phrases)
+            bigrams = []
+            for i in range(len(words) - 1):
+                if (words[i] not in stopwords and words[i+1] not in stopwords and
+                    len(words[i]) > 2 and len(words[i+1]) > 2):
+                    bigram = f"{words[i]} {words[i+1]}"
+                    bigrams.append(bigram)
+            
+            trigrams = []
+            for i in range(len(words) - 2):
+                if (words[i] not in stopwords and 
+                    words[i+1] not in stopwords and 
+                    words[i+2] not in stopwords and
+                    len(words[i]) > 2 and 
+                    len(words[i+1]) > 2 and 
+                    len(words[i+2]) > 2):
+                    trigram = f"{words[i]} {words[i+1]} {words[i+2]}"
+                    trigrams.append(trigram)
+            
+            bigram_freq = Counter(bigrams)
+            trigram_freq = Counter(trigrams)
+            
+            # If we don't have enough keywords from the result, extract from text
+            if len(keywords) < 15:
+                # Calculate TF-IDF scores for single words
+                # For simplicity, we'll use a variant that focuses on term frequency and term specificity
                 candidates = []
-                for word, count in word_freq.most_common(20):
-                    # Base score is frequency
-                    score = count
-                    
-                    # Adjust by word length (longer words often more meaningful)
-                    length_factor = min(2.0, len(word) / 4)
-                    
-                    # Final word score
-                    candidates.append((word, score * length_factor))
                 
-                for bigram, count in bigram_freq.most_common(15):
+                # Get total word count for tf calculation
+                total_words = len(filtered_words)
+                
+                # Calculate for unigrams (single words)
+                for word, count in word_freq.most_common(30):
+                    # Term frequency
+                    tf = count / max(1, total_words)
+                    
+                    # Specificity score (longer words often more meaningful)
+                    specificity = min(1.0, len(word) / 10)
+                    
+                    # Position score (words appearing in the beginning or end often more important)
+                    word_positions = [i for i, w in enumerate(words) if w == word]
+                    position_scores = []
+                    for pos in word_positions:
+                        relative_pos = pos / max(1, len(words))
+                        # Higher score for words near the beginning or end
+                        if relative_pos < 0.2 or relative_pos > 0.8:
+                            position_scores.append(0.8)
+                        else:
+                            position_scores.append(0.5)
+                    position_score = sum(position_scores) / max(1, len(position_scores))
+                    
+                    # Calculate final score
+                    final_score = tf * (0.6 + 0.2 * specificity + 0.2 * position_score)
+                    
+                    candidates.append((word, final_score, "concept"))
+                
+                # Add bigrams with higher weight
+                for bigram, count in bigram_freq.most_common(20):
                     # Bigrams get a boost
-                    candidates.append((bigram, count * 2.0))
+                    tf = count / max(1, len(bigrams))
+                    score = tf * 1.5  # Boost bigrams
+                    candidates.append((bigram, score, "phrase"))
+                
+                # Add trigrams with even higher weight
+                for trigram, count in trigram_freq.most_common(10):
+                    # Trigrams get an even bigger boost
+                    tf = count / max(1, len(trigrams))
+                    score = tf * 2.0  # Boost trigrams
+                    candidates.append((trigram, score, "phrase"))
                 
                 # Sort by score and take top candidates
                 candidates.sort(key=lambda x: x[1], reverse=True)
-                extracted_keywords = [c[0] for c in candidates[:15]]
+                extracted_keywords = [(c[0], c[2]) for c in candidates[:30]]
                 
                 # Add any extracted keywords that aren't already in our list
-                for kw in extracted_keywords:
-                    if kw not in keywords:
-                        keywords.append(kw)
+                for kw, category in extracted_keywords:
+                    if kw not in [k for k, _ in keywords]:
+                        keywords.append((kw, category))
+            else:
+                # Assign categories to existing keywords
+                keywords = [(kw, self._determine_keyword_category(kw, text)) for kw in keywords]
             
             # Ensure proper casing for keywords
             proper_case_keywords = []
-            for keyword in keywords:
+            for keyword, category in keywords:
                 # Try to find the keyword with proper casing in the original text
                 keyword_lower = keyword.lower()
                 pattern = re.compile(r'\b' + re.escape(keyword_lower) + r'\b', re.IGNORECASE)
@@ -765,13 +818,16 @@ class LlamaModel:
                 if matches:
                     # Use the most common case
                     case_counter = Counter(matches)
-                    proper_case_keywords.append(case_counter.most_common(1)[0][0])
+                    proper_case_keywords.append((case_counter.most_common(1)[0][0], category))
                 else:
-                    proper_case_keywords.append(keyword)
+                    proper_case_keywords.append((keyword, category))
             
-            # Assign weights based on relevance
-            keyword_weights = []
-            for i, keyword in enumerate(proper_case_keywords[:15]):  # Limit to top 15
+            # Group keywords by semantic similarity to identify themes
+            themes = self._identify_themes(proper_case_keywords)
+            
+            # Assign weights and additional metadata to keywords
+            keyword_data = []
+            for i, (keyword, category) in enumerate(proper_case_keywords[:25]):  # Limit to top 25
                 # Base weight - decreases slightly with position
                 base_weight = 10.3 - (i * 0.05)
                 
@@ -786,23 +842,176 @@ class LlamaModel:
                 first_pos = text.lower().find(keyword.lower())
                 pos_factor = 0.1 * (1.0 - min(1.0, first_pos / len(text))) if first_pos >= 0 else 0
                 
-                # Final weight with some randomness
-                final_weight = base_weight + freq_factor + length_factor + pos_factor
-                final_weight += random.uniform(-0.1, 0.1)  # Add slight randomness
+                # Capitalization bonus for proper nouns
+                cap_bonus = 0.1 if keyword[0].isupper() else 0
+                
+                # Theme bonus for keywords in a known theme
+                theme_bonus = 0.15 if any(keyword in theme_words for theme, theme_words in themes) else 0
+                
+                # Final weight with controlled randomness
+                final_weight = base_weight + freq_factor + length_factor + pos_factor + cap_bonus + theme_bonus
+                final_weight += random.uniform(-0.1, 0.1)  # Add slight randomness for visual variation
                 
                 # Ensure weight is in reasonable range
                 final_weight = min(10.5, max(9.5, final_weight))
                 
-                keyword_weights.append((keyword, final_weight))
+                # Identify theme for this keyword
+                theme = "General"
+                for theme_name, theme_words in themes:
+                    if keyword in theme_words:
+                        theme = theme_name
+                        break
+                
+                # Add rich keyword data
+                keyword_data.append({
+                    "keyword": keyword,
+                    "weight": final_weight,
+                    "category": category,
+                    "theme": theme,
+                    "occurrences": frequency,
+                    "is_entity": keyword[0].isupper()  # Simple entity detection
+                })
             
             # Sort by weight
-            keyword_weights.sort(key=lambda x: x[1], reverse=True)
+            keyword_data.sort(key=lambda x: x["weight"], reverse=True)
             
-            return keyword_weights
+            # Return in compatible format (list of tuples) while maintaining rich data
+            return [(item["keyword"], item["weight"], item.get("category", ""), item.get("theme", "")) 
+                    for item in keyword_data]
         except Exception as e:
             logger.error(f"Error in keyword extraction: {str(e)}")
-            return [("Error", 10.0)]
+            return [("Error", 10.0, "error", "")]
     
+    def _get_enhanced_stopwords(self):
+        """
+        Returns an enhanced set of English stopwords.
+        """
+        # Start with the basic stopwords
+        basic_stopwords = self._get_stopwords()
+        
+        # Add more domain-general words that don't add semantic value
+        additional_stopwords = {
+            "according", "actually", "additionally", "affect", "affected", "affecting",
+            "affects", "afterwards", "almost", "already", "although", "altogether",
+            "approximately", "aside", "away", "became", "become", "becomes", "becoming",
+            "beforehand", "begin", "beginning", "beginnings", "begins", "beside",
+            "besides", "beyond", "came", "cannot", "certain", "certainly", "come",
+            "comes", "contain", "containing", "contains", "corresponding", "despite",
+            "does", "doing", "done", "else", "elsewhere", "enough", "especially",
+            "etc", "ever", "example", "examples", "far", "fifth", "find", "four",
+            "found", "furthermore", "gave", "getting", "give", "given", "gives",
+            "giving", "goes", "gone", "gotten", "happens", "hardly", "hence",
+            "hereby", "herein", "hereupon", "hers", "herself", "himself", "hither",
+            "hopefully", "how", "howbeit", "however", "hundred", "immediate",
+            "immediately", "importance", "important", "inc", "include", "included",
+            "includes", "including", "indeed", "indicate", "indicated", "indicates",
+            "inner", "insofar", "instead", "interest", "interested", "interesting",
+            "interests", "inward", "keep", "keeps", "kept", "know", "known", "knows",
+            "lately", "latter", "latterly", "least", "less", "lest", "let", "lets",
+            "liked", "likely", "little", "look", "looking", "looks", "ltd", "mainly",
+            "maybe", "mean", "means", "meantime", "meanwhile", "merely", "mill",
+            "mine", "moreover", "mostly", "move", "namely", "near", "nearly",
+            "necessary", "need", "needed", "needing", "needs", "neither", "never",
+            "nevertheless", "nine", "nobody", "non", "none", "nonetheless", "noone",
+            "normally", "nothing", "notice", "now", "nowhere", "obviously", "often",
+            "oh", "okay", "old", "ones", "onto", "opposite", "otherwise", "ought",
+            "outside", "overall", "particular", "particularly", "past", "placed",
+            "please", "plus", "possible", "presumably", "probably", "provides",
+            "que", "quite", "qv", "rather", "readily", "really", "reasonably",
+            "regarding", "regardless", "regards", "relatively", "respectively",
+            "right", "said", "saw", "say", "saying", "says", "second", "secondly",
+            "see", "seeing", "seem", "seemed", "seeming", "seems", "seen", "self",
+            "selves", "sensible", "sent", "serious", "seriously", "seven", "several",
+            "shall", "shes", "show", "showed", "shown", "shows", "side", "sides",
+            "significant", "similar", "similarly", "six", "slightly", "somebody",
+            "somehow", "someone", "something", "sometime", "sometimes", "somewhat",
+            "somewhere", "soon", "sorry", "specifically", "specified", "specify",
+            "specifying", "sub", "sup", "tell", "tends", "th", "thank", "thanks",
+            "thanx", "thats", "thence", "thereafter", "thereby", "therefore", "therein",
+            "theres", "thereupon", "they", "think", "third", "thither", "thorough",
+            "thoroughly", "thought", "three", "throughout", "thru", "thus", "till",
+            "toward", "towards", "truly", "trying", "twice", "un", "under", "unfortunately",
+            "unless", "unlikely", "upon", "use", "used", "useful", "uses", "using",
+            "usually", "value", "various", "via", "viz", "vs", "want", "wants", "way",
+            "welcome", "went", "whatever", "whence", "whenever", "whereafter", "whereas",
+            "whereby", "wherein", "whereupon", "wherever", "whether", "whither", "whoever",
+            "whole", "whom", "whomever", "whose", "willing", "wish", "within", "without",
+            "wonder", "wont", "words", "world", "wouldnt", "www", "yes", "yet", "zero"
+        }
+        
+        # Combine both sets
+        return basic_stopwords.union(additional_stopwords)
+
+    def _determine_keyword_category(self, keyword, text):
+        """
+        Determines the category of a keyword.
+        
+        Args:
+            keyword (str): The keyword to categorize
+            text (str): The original text
+            
+        Returns:
+            str: Category of the keyword
+        """
+        # Check if it appears to be a named entity (proper noun)
+        if keyword[0].isupper() and not keyword.isupper():
+            return "entity"
+        
+        # Check if it's a multi-word phrase
+        if " " in keyword:
+            return "phrase"
+        
+        # Check if it's a technical term
+        technical_indicators = [
+            "algorithm", "function", "method", "system", "process", "data",
+            "analysis", "research", "study", "experiment", "result", "conclusion",
+            "theory", "concept", "framework", "model", "approach", "technique",
+            "technology", "implementation", "application", "device", "machine",
+            "software", "hardware", "code", "programming", "development",
+            "engineering", "science", "scientific", "technical", "protocol"
+        ]
+        
+        if any(ti in text.lower() for ti in technical_indicators):
+            return "technical"
+        
+        # Default category
+        return "concept"
+
+    def _identify_themes(self, keywords):
+        """
+        Identifies potential themes by grouping semantically related keywords.
+        
+        Args:
+            keywords (list): List of (keyword, category) tuples
+            
+        Returns:
+            list: List of (theme_name, [keywords]) tuples
+        """
+        themes = []
+        
+        # Simple approach: group by common words/prefixes
+        grouped_keywords = {}
+        
+        for keyword, _ in keywords:
+            words = keyword.lower().split()
+            
+            # Add to groups based on significant words
+            for word in words:
+                if len(word) > 3 and word not in self._get_stopwords():
+                    if word not in grouped_keywords:
+                        grouped_keywords[word] = []
+                    grouped_keywords[word].append(keyword)
+        
+        # Keep only groups with multiple keywords
+        for key, group in grouped_keywords.items():
+            if len(group) >= 2:
+                themes.append((key.capitalize(), group))
+        
+        # Sort themes by number of keywords
+        themes.sort(key=lambda x: len(x[1]), reverse=True)
+        
+        return themes[:5]  # Return top 5 themes
+        
     def _get_stopwords(self):
         """
         Returns an enhanced set of English stopwords.
