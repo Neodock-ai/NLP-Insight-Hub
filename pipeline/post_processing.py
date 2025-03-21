@@ -1,42 +1,100 @@
 import re
 
-def format_summary(summary):
+def format_summary(summary_result):
     """
-    Formats the summary output with improved formatting and structure.
+    Formats the summary output with improved formatting and comprehensive insights.
     
     Args:
-        summary (str): The raw summary text from the model
+        summary_result: Can be a string or a dictionary with detailed summary data
         
     Returns:
-        str: Formatted summary with markdown styling
+        dict: Structured summary data with formatted text and visualization data
     """
-    summary = summary.strip()
-    
-    # Remove any prefixes like "Summary:" that might be in the output
-    summary = re.sub(r'^(Summary:?\s*)', '', summary, flags=re.IGNORECASE)
-    
-    # Split into paragraphs if it's a long summary
-    paragraphs = summary.split('\n\n')
-    formatted_paragraphs = []
-    
-    for paragraph in paragraphs:
-        # Clean up the paragraph
-        clean_paragraph = paragraph.strip()
-        if clean_paragraph:
-            formatted_paragraphs.append(clean_paragraph)
-    
-    # If there are multiple paragraphs, format them with bullet points
-    if len(formatted_paragraphs) > 1:
-        formatted_text = "## Text Summary\n\n"
-        for para in formatted_paragraphs:
-            formatted_text += f"• {para}\n\n"
-        return formatted_text
+    # Handle different input types
+    if isinstance(summary_result, dict) and "text" in summary_result:
+        # Use the enhanced summary data
+        summary_text = summary_result["text"]
+        topics = summary_result.get("topics", [])
+        readability = summary_result.get("readability", {})
+        coverage = summary_result.get("coverage", 0)
+        word_count = summary_result.get("word_count", 0)
+        compression_ratio = summary_result.get("compression_ratio", 0)
     else:
-        # For single paragraphs, use simpler formatting
-        return f"""## Text Summary
+        # Process the string input
+        summary_text = str(summary_result).strip()
+        topics = []
+        readability = {}
+        coverage = 0
+        word_count = len(summary_text.split())
+        compression_ratio = 0
+    
+    # Clean up the summary
+    summary_text = summary_text.strip()
+    
+    # Create the formatted output with enhanced details
+    markdown_text = f"""## Text Summary
 
-{summary}
+{summary_text}
+
 """
+    
+    # Add topics if available
+    if topics:
+        topic_text = ", ".join(topics)
+        markdown_text += f"**Key Topics:** {topic_text}\n\n"
+    
+    # Add readability metrics if available
+    if readability and "score" in readability:
+        score = readability.get("score", 0)
+        grade_level = readability.get("grade_level", "Unknown")
+        complexity = readability.get("complexity", "Unknown")
+        
+        # Add visual indicator for readability
+        if score >= 70:
+            indicator = "✓ Easy to read"
+        elif score >= 50:
+            indicator = "○ Average readability"
+        else:
+            indicator = "⚠ Complex reading"
+            
+        markdown_text += f"**Readability:** {indicator} ({grade_level} level)\n\n"
+    
+    # Add coverage and stats if available
+    if coverage > 0:
+        coverage_pct = int(coverage * 100)
+        
+        # Format coverage with visual indicator
+        if coverage_pct >= 80:
+            coverage_text = f"✓ High coverage ({coverage_pct}%)"
+        elif coverage_pct >= 60:
+            coverage_text = f"○ Good coverage ({coverage_pct}%)"
+        else:
+            coverage_text = f"⚠ Limited coverage ({coverage_pct}%)"
+            
+        markdown_text += f"**Coverage:** {coverage_text}\n\n"
+    
+    # Add word count and compression
+    if word_count > 0:
+        markdown_text += f"**Length:** {word_count} words"
+        
+        if compression_ratio > 0:
+            compression_pct = int((1 - (1 / compression_ratio)) * 100)
+            markdown_text += f" ({compression_pct}% reduction from original)\n\n"
+        else:
+            markdown_text += "\n\n"
+    
+    markdown_text += "*This summary was generated using advanced NLP techniques to capture key information.*"
+    
+    # Return a dictionary with both the raw data and formatted text
+    return {
+        "text": markdown_text,
+        "raw_summary": summary_text,
+        "topics": topics,
+        "readability": readability,
+        "coverage": coverage,
+        "word_count": word_count,
+        "compression_ratio": compression_ratio
+    }
 
 def format_sentiment(sentiment_result):
     """
