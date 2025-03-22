@@ -68,7 +68,7 @@ def clean_summary_output(summary):
     # Remove any "Summary:" prefix that might appear in the output
     summary = re.sub(r'^(Summary:?\s*)', '', summary, flags=re.IGNORECASE)
     
-    # Fix sentence spacing issues
+    # Fix sentence spacing issues (e.g., "end.This" -> "end. This")
     summary = re.sub(r'\.([A-Z])', r'. \1', summary)
     
     # Remove duplicate sentences that might appear
@@ -101,7 +101,7 @@ def format_improved_summary(summary):
 
 def parse_sentiment_result(sentiment_result):
     """
-    Parse sentiment results to handle different output formats.
+    Parse sentiment results to handle different output formats (string vs dict).
     """
     if isinstance(sentiment_result, dict):
         # Handle dictionary output (new format)
@@ -182,60 +182,58 @@ def improve_qa_answer(answer):
 
 # ========== ENHANCED PROCESSING FUNCTION ==========
 
-# Cache expensive operations
 @st.cache_data
 def process_text(text, model, tasks):
-    """Process text with the selected model and return results for all tasks"""
+    """
+    Process text with the selected model and return results for all tasks.
+    We still rely on your pipeline.inference methods, 
+    but we do some local pre- and post-processing.
+    """
     results = {}
+    
+    # 1) Clean text
     clean_text = pre_processing.clean_text(text)
     
+    # 2) Summarization
     if "Summarization" in tasks:
         try:
-            # Improve the text before summarization
             summary_text = improve_summary_text(clean_text)
-            
-            # Get the summary
             summary = inference.get_summary(summary_text, model=model)
-            
-            # Clean and improve the summary
             improved_summary = clean_summary_output(summary)
-            
-            # Format the summary
             results["Summary"] = format_improved_summary(improved_summary)
-            
             logger.info(f"Summarization completed with {model}")
         except Exception as e:
             logger.error(f"Summarization failed: {str(e)}")
             results["Summary"] = f"Error generating summary: {str(e)}"
     
+    # 3) Sentiment
     if "Sentiment Analysis" in tasks:
         try:
-            # Create a better prompt for sentiment analysis
+            # We create a better prompt locally (though it's not strictly used by the old pipeline logic)
             sentiment_prompt = enhance_sentiment_prompt(clean_text)
             
-            # Get the sentiment (using the standard method but with improved prompt)
+            # Get the sentiment from inference
             sentiment = inference.get_sentiment(clean_text, model=model)
             
-            # Process and format the sentiment results
+            # Format
             formatted_sentiment = format_improved_sentiment(sentiment)
-            
             results["Sentiment Analysis"] = {
                 "text": formatted_sentiment["text"],
                 "raw_sentiment": formatted_sentiment["raw_sentiment"],
-                "data": sentiment  # Keep original data for visualization
+                "data": sentiment  # Keep original data for chart
             }
-            
             logger.info(f"Sentiment analysis completed with {model}")
         except Exception as e:
             logger.error(f"Sentiment analysis failed: {str(e)}")
             results["Sentiment Analysis"] = {"text": f"Error analyzing sentiment: {str(e)}"}
     
+    # 4) Keywords
     if "Keyword Extraction" in tasks:
         try:
             keywords = inference.get_keywords(clean_text, model=model)
             results["Keyword Extraction"] = {
                 "text": post_processing.format_keywords(keywords),
-                "data": keywords  # Raw data for visualization
+                "data": keywords  # For visualizations
             }
         except Exception as e:
             logger.error(f"Keyword extraction failed: {str(e)}")
@@ -254,7 +252,7 @@ def main():
     st.title("NLP Insight Hub")
     st.write("### An Industry-Level AI-Powered NLP Pipeline for Business Insights")
     
-    # Add session state for persistent settings
+    # Session state
     if 'processed' not in st.session_state:
         st.session_state.processed = False
     if 'clean_text' not in st.session_state:
@@ -264,15 +262,25 @@ def main():
     if 'raw_text' not in st.session_state:
         st.session_state.raw_text = ""
     
-    # Sidebar configuration for model and tasks
+    # ========== SIDEBAR: MODEL CHOICE & OPENAI KEY ==========
+
     st.sidebar.header("Configuration")
-    
-    # Model selection with descriptions
+
+    # 1) Let user optionally enter an OpenAI API key
+    #    If they pick "OpenAI GPT" below, we'll set this key on the model
+    user_api_key = st.sidebar.text_input(
+        "OpenAI API key (optional)",
+        type="password",
+        help="Enter your OpenAI API key if you select 'OpenAI GPT' as your model."
+    )
+
+    # 2) Model selection
     model_options = {
         "Llama": "Meta's powerful large language model",
         "Falcon": "TII's efficient open-source LLM",
         "Mistral": "Lightweight and high-performance model",
-        "DeepSeek": "Advanced model for complex language tasks"
+        "DeepSeek": "Advanced model for complex language tasks",
+        "OpenAI GPT": "GPT-based chunked approach (requires API key)"
     }
     model_choice = st.sidebar.selectbox(
         "Select Model", 
@@ -280,15 +288,14 @@ def main():
         help="Choose the AI model that will process your text"
     )
     st.sidebar.caption(model_options[model_choice])
-    
-    # Task selection with descriptions
+
+    # 3) Task selection
     task_options = {
         "Summarization": "Generate concise summaries of your text",
         "Sentiment Analysis": "Determine the emotional tone of the text",
         "Keyword Extraction": "Identify important topics and terms",
         "Q&A": "Ask questions about the content"
     }
-    
     task_choices = st.sidebar.multiselect(
         "Select Tasks",
         list(task_options.keys()),
@@ -296,7 +303,7 @@ def main():
         help="Choose which analyses to perform on your text"
     )
     
-    # Add advanced settings in expander
+    # 4) Advanced Settings
     with st.sidebar.expander("Advanced Settings"):
         summarization_length = st.slider(
             "Summary Length", 
@@ -305,16 +312,15 @@ def main():
             value=3,
             help="Controls the length of generated summaries (1=very brief, 5=detailed)"
         )
-        
         visualization_enabled = st.checkbox(
             "Enable Visualizations", 
             value=True,
             help="Show charts and visualizations for analysis results"
         )
     
-    # Input section
+    # ========== INPUT SECTION ==========
+
     st.sidebar.write("Upload a text file or paste text below:")
-    
     tab1, tab2 = st.tabs(["📄 Upload File", "✏️ Enter Text"])
     
     with tab1:
@@ -323,7 +329,8 @@ def main():
     with tab2:
         text_input = st.text_area("Paste text here:", height=200)
     
-    # Process button
+    # ========== PROCESS BUTTON ==========
+
     col1, col2 = st.columns([1, 4])
     with col1:
         process_button = st.button("Process Text", type="primary")
@@ -331,13 +338,14 @@ def main():
         if process_button:
             st.session_state.start_time = time.time()
     
-    # Progress tracking
+    # ========== MAIN PROCESSING LOGIC ==========
+
     if process_button and (uploaded_file or text_input):
         progress_bar = st.progress(0)
         status_text = st.empty()
         
         try:
-            # Data Ingestion
+            # Step 1: read input
             status_text.text("Reading input...")
             progress_bar.progress(10)
             
@@ -349,19 +357,30 @@ def main():
                     raw_text = data_ingestion.read_pdf(uploaded_file)
                 elif file_extension == '.docx':
                     raw_text = data_ingestion.read_docx(uploaded_file)
+                else:
+                    raise ValueError("Unsupported file format.")
             else:
                 if not text_input.strip():
                     st.warning("Please enter some text or upload a file.")
                     st.stop()
                 raw_text = text_input
 
-            # Store the raw text for display
             st.session_state.raw_text = raw_text
 
+            # Step 2: set the OpenAI API key if user chose "OpenAI GPT"
+            if model_choice == "OpenAI GPT":
+                if not user_api_key.strip():
+                    st.error("You selected 'OpenAI GPT', but no API key was provided.")
+                    st.stop()
+                else:
+                    # We call inference.get_model_instance(...) here just to set the key
+                    model_instance = inference.get_model_instance("OpenAI GPT")
+                    inference.set_openai_api_key(model_instance, user_api_key)
+            
             status_text.text("Processing text...")
             progress_bar.progress(30)
             
-            # Process the text and get results
+            # Step 3: process the text with chosen tasks
             st.session_state.clean_text, st.session_state.results = process_text(
                 raw_text, 
                 model_choice, 
@@ -371,23 +390,18 @@ def main():
             progress_bar.progress(90)
             status_text.text("Finalizing results...")
             
-            # Set processed flag to true
             st.session_state.processed = True
-            
-            # Finish
             progress_bar.progress(100)
             status_text.text("Processing complete!")
             
-            # Calculate and display processing time
+            # Show timing
             processing_time = time.time() - st.session_state.start_time
             st.success(f"✅ Text processed successfully in {processing_time:.2f} seconds")
             
-            # Auto-remove progress indicators after 2 seconds
             time.sleep(2)
             progress_bar.empty()
             status_text.empty()
             
-            # Force page refresh to show results
             st.rerun()
 
         except Exception as ex:
@@ -397,20 +411,21 @@ def main():
             st.error(f"Error details: {str(ex)}")
             logger.exception("Error in NLP processing", exc_info=ex)
             
-            # Provide troubleshooting information
+            # Provide troubleshooting
             st.info(
-                "Troubleshooting tips: \n"
-                "1. Check if the text format is compatible \n"
-                "2. Try with a smaller text sample \n" 
-                "3. Restart the application"
+                "Troubleshooting tips:\n"
+                "1. Check if the text format is compatible.\n"
+                "2. Try with a smaller text sample.\n"
+                "3. Restart the application."
             )
     
-    # Show the results if data has been processed
+    # ========== DISPLAY RESULTS ==========
+
     if st.session_state.processed:
-        # Original and cleaned text expanders
         with st.expander("Original and Cleaned Text", expanded=False):
             tabs = st.tabs(["Original", "Cleaned"])
             with tabs[0]:
+                # Show file name if used
                 if 'uploaded_file' in locals() and uploaded_file:
                     st.write(f"File: {uploaded_file.name}")
                 st.write(st.session_state.raw_text)
@@ -421,69 +436,63 @@ def main():
         if st.session_state.results:
             st.subheader("Analysis Results")
             
-            # Create tabs for different results
-            result_tabs = st.tabs([task for task in st.session_state.results.keys() if task != "Q&A"])
+            # Create tabs for Summarization, Sentiment Analysis, etc. (except Q&A)
+            non_qa_tasks = [task for task in st.session_state.results.keys() if task != "Q&A"]
+            result_tabs = st.tabs(non_qa_tasks)
             
             for i, (key, value) in enumerate([(k, v) for k, v in st.session_state.results.items() if k != "Q&A"]):
                 with result_tabs[i]:
-                    # Different display depending on the result type
+                    # Summaries
                     if key == "Summary":
                         st.markdown(value)
+
+                    # Sentiment
                     elif key == "Sentiment Analysis" and isinstance(value, dict):
                         col1, col2 = st.columns([3, 2])
                         with col1:
-                            # Use safe markdown rendering
                             if "text" in value and isinstance(value["text"], str):
                                 st.markdown(value["text"])
                             else:
-                                # Extract sentiment value to determine display
+                                # fallback
                                 raw_sentiment = value.get("raw_sentiment", "").strip().lower()
-                                
                                 st.markdown("## Sentiment Analysis")
-                                
-                                # Determine sentiment category and emoji
                                 if "positive" in raw_sentiment:
-                                    sentiment_text = "Positive"
-                                    emoji = "😃"
-                                    st.markdown(f"**Overall sentiment:** **{sentiment_text}** {emoji}")
+                                    st.markdown("**Overall sentiment: Positive 😃**")
                                 elif "negative" in raw_sentiment:
-                                    sentiment_text = "Negative"
-                                    emoji = "😞"
-                                    st.markdown(f"**Overall sentiment:** **{sentiment_text}** {emoji}")
+                                    st.markdown("**Overall sentiment: Negative 😞**")
                                 else:
-                                    sentiment_text = "Neutral"
-                                    emoji = "😐"
-                                    st.markdown(f"**Overall sentiment:** **{sentiment_text}** {emoji}")
-                                    
-                                st.markdown("*Note: This is an automated sentiment analysis and may not capture nuanced emotions.*")
+                                    st.markdown("**Overall sentiment: Neutral 😐**")
+                                st.markdown("*Note: This is an automated sentiment analysis.*")
                         
                         with col2:
                             if visualization_enabled and "data" in value:
+                                # 'data' is the raw sentiment dict or str
                                 sentiment_chart = create_sentiment_chart(value["data"])
                                 st.plotly_chart(sentiment_chart, use_container_width=True)
-                    
+
+                    # Keywords
                     elif key == "Keyword Extraction" and "data" in value:
                         col1, col2 = st.columns([2, 3])
                         with col1:
-                            # Use only the markdown part
                             if "text" in value and isinstance(value["text"], str):
                                 st.markdown(value["text"])
                             else:
-                                st.markdown("## Key Topics & Concepts")
-                                st.markdown("Keywords extracted from the text:")
-                        
+                                st.markdown("## Key Topics & Concepts\nKeywords extracted from the text:")
                         with col2:
                             if visualization_enabled and "data" in value:
                                 keyword_cloud = create_keyword_cloud(value["data"])
                                 st.plotly_chart(keyword_cloud, use_container_width=True)
+
                     else:
-                        # Fallback for other result types
-                        st.markdown(value["text"] if isinstance(value, dict) and "text" in value else value)
-            
-            # Q&A section (separate from tabs)
+                        # Fallback for other
+                        if isinstance(value, dict) and "text" in value:
+                            st.markdown(value["text"])
+                        else:
+                            st.markdown(str(value))
+
+            # Q&A 
             if "Q&A" in task_choices:
                 st.subheader("Ask Questions About Your Text")
-                
                 question = st.text_input("Enter your question about the text:")
                 ask_button = st.button("Ask Question")
                 
@@ -491,29 +500,22 @@ def main():
                     with st.spinner("Processing your question..."):
                         try:
                             answer = inference.get_qa(st.session_state.clean_text, question, model=model_choice)
-                            
-                            # Apply improved formatting
                             formatted_answer = improve_qa_answer(answer)
-                            
-                            # Display answer in a nice format
                             st.markdown("### Answer")
                             st.markdown(formatted_answer)
                             
-                            # Add the Q&A to results history
+                            # Save Q&A to history
                             if "Q&A History" not in st.session_state:
                                 st.session_state["Q&A History"] = []
-                                
                             st.session_state["Q&A History"].append({
                                 "question": question,
                                 "answer": formatted_answer
                             })
-                            
                             logger.info("Q&A processing completed.")
                         except Exception as e:
                             logger.error(f"Q&A processing failed: {str(e)}")
                             st.error(f"Error processing question: {str(e)}")
                 
-                # Display Q&A history if available
                 if "Q&A History" in st.session_state and st.session_state["Q&A History"]:
                     with st.expander("Q&A History", expanded=False):
                         for i, qa in enumerate(st.session_state["Q&A History"]):
@@ -521,16 +523,12 @@ def main():
                             st.markdown(qa['answer'])
                             st.divider()
         
-        # Export options
+        # Export
         with st.expander("Export Results", expanded=False):
-            export_format = st.selectbox(
-                "Select export format:",
-                ["PDF", "JSON", "CSV", "TXT"]
-            )
-            
+            export_format = st.selectbox("Select export format:", ["PDF", "JSON", "CSV", "TXT"])
             if st.button("Export Results"):
                 st.info("Export functionality would generate a downloadable file with the results.")
-                # This would connect to actual export functionality
+                # Placeholder for actual exporting logic
 
 if __name__ == "__main__":
     try:
