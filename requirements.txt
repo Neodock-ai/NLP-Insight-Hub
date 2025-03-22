@@ -10,3 +10,4 @@ plotly==5.18.0
 PyPDF2==3.0.1
 python-docx==1.0.1
 scikit-learn==1.4.0
+openai==0.28.1
